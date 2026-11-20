@@ -243,13 +243,13 @@ def render_scope_entries(
 
     table = Table(title="Authorized Scope Entries")
     table.add_column("ID", style="cyan", no_wrap=True)
-    table.add_column("Target")
-    table.add_column("Type")
-    table.add_column("Subdomains")
+    table.add_column("Target", min_width=16, overflow="fold")
+    table.add_column("Type", no_wrap=True)
+    table.add_column("Sub", no_wrap=True)
     table.add_column("Owner")
     table.add_column("Ref")
-    table.add_column("Expires")
-    table.add_column("Status")
+    table.add_column("Expires", no_wrap=True)
+    table.add_column("Status", no_wrap=True)
     for e in entries:
         status = "EXPIRED" if e.is_expired() else ("EXCLUDE" if e.exclude else "ACTIVE")
         table.add_row(

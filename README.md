@@ -13,15 +13,19 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-10b981?style=for-the-badge)](LICENSE)
 [![Tests](https://img.shields.io/badge/Tests-Passing-22c55e?style=for-the-badge)](.github/workflows/ci.yml)
 [![MCP](https://img.shields.io/badge/MCP_Server-Online_HTTP_%2B_Stdio-8b5cf6?style=for-the-badge)](#online-and-local-mcp-server-s1shell-mcp-serve)
+[![AI Skills](https://img.shields.io/badge/Defensive_AI-9_Skills_%2B_ReAct-06b6d4?style=for-the-badge)](#defensive-ai-skills)
+[![Tor](https://img.shields.io/badge/Tor-Zero--Leak_SOCKS5h-7c3aed?style=for-the-badge)](#defensive-tor-routing)
 
 <br />
 
-**Open-source defensive security assessment, passive OSINT, SBOM auditing, and reporting CLI built for Kali Linux & Linux.**
+**Open-source defensive security assessment, passive OSINT, SBOM auditing, AI triage, and reporting CLI built for Kali Linux & Linux.**
 
 [⚡ Setup & Install](#part-1-setup--configuration) &nbsp;·&nbsp;
 [🔑 API Keys & Logins](#13-configure-optional-api-keys--ai-provider-env-atomic-0600) &nbsp;·&nbsp;
+[🌐 Online MCP](#online-and-local-mcp-server-s1shell-mcp-serve) &nbsp;·&nbsp;
+[🧅 Tor Routing](#defensive-tor-routing) &nbsp;·&nbsp;
 [🎯 Pentesting Guide (`target.com`)](#part-2-pentesting--assessment-guide-example-httpswwwtargetcom) &nbsp;·&nbsp;
-[🌐 Online MCP Server](#online-and-local-mcp-server-s1shell-mcp-serve) &nbsp;·&nbsp;
+[🧠 AI Skills](#defensive-ai-skills) &nbsp;·&nbsp;
 [📖 CLI Reference](#part-3-reference-cicd--troubleshooting)
 
 </div>
@@ -32,17 +36,20 @@
 
 ```mermaid
 flowchart LR
-    CLI["s1shell CLI / Online HTTP & Stdio MCP"] --> GATE["Policy Gate\nScope -> Auth -> IP Pin -> SHA-256 Audit"]
-    CLI --> INTEL["Zero-Target-Contact Intel\nSQLite TTL Cache + Retry"]
-    CLI --> OFFLINE["Offline Analysis & Reporting\nZero Network Required"]
+    CLI["s1shell CLI\n(16 Modules · --tor / --tor-targets)"] --> GATE["Policy Gate\nScope -> Auth -> IP Pin / Tor SOCKS5h -> SHA-256 Audit"]
+    CLI --> INTEL["Zero-Target-Contact Intel\n7 Feeds · SQLite Cache · Optional --tor"]
+    CLI --> AI["Defensive AI Engine\n9 Skills · Pipelines · ReAct · Grounding · Redact"]
+    CLI --> OFFLINE["Offline Tools & Online MCP\nCodec · Remediate · Diff · HTTP/Stdio MCP"]
 
-    GATE --> TARGET["profile / fingerprint\nassess [--targets-file]"]
+    GATE --> TARGET["profile · fingerprint · assess\nClearnet + Authorized v3 .onion"]
     INTEL --> FEEDS["NVD · CVE.org · OSV.dev · KEV · EPSS\nVT · GreyNoise · urlscan · GHSA · crt.sh · RDAP"]
-    OFFLINE --> OUT["codec · remediate · diff\nHTML · MD · JSON · SARIF 2.1.0"]
+    AI --> MODELS["Local Ollama (--local-only)\nAnthropic · OpenAI-Compat · Gemini"]
+    OFFLINE --> OUT["HTML · MD · JSON · SARIF 2.1.0\n23–26 MCP Tools · Resources · Prompts"]
 
     style CLI fill:#0f172a,stroke:#38bdf8,color:#f8fafc
     style GATE fill:#0f172a,stroke:#f59e0b,color:#f8fafc
     style INTEL fill:#0f172a,stroke:#22d3ee,color:#f8fafc
+    style AI fill:#0f172a,stroke:#a78bfa,color:#f8fafc
     style OFFLINE fill:#0f172a,stroke:#34d399,color:#f8fafc
 ```
 
@@ -54,7 +61,7 @@ flowchart LR
   <tr>
     <td width="50%" valign="top">
       <h3>🛡️ Fail-Closed Scope &amp; Governance</h3>
-      Allow/deny (<code>--exclude</code>) rules, bulk import (<code>--dry-run</code>), DNS rebinding + private/CGNAT (<code>100.64.0.0/10</code>)/NAT64 (<code>64:ff9b::/96</code>)/IPv4-mapped IPv6/metadata guards, IP-pinned HTTP/TLS, atomic <code>0600</code> writes, and a file-locked (<code>fcntl.flock</code>) <code>O(1)</code> SHA-256 hash-chained <code>audit.log</code>.
+      Allow/deny (<code>--exclude</code>) rules for domains, IPs, CIDRs, URL prefixes, and <b>Tor v3 <code>.onion</code></b>, bulk import (<code>--dry-run</code>), DNS rebinding + private/CGNAT (<code>100.64.0.0/10</code>)/NAT64 (<code>64:ff9b::/96</code>)/IPv4-mapped IPv6/metadata guards, IP-pinned HTTP/TLS, atomic <code>0600</code> writes, and a file-locked (<code>fcntl.flock</code>) <code>O(1)</code> SHA-256 hash-chained <code>audit.log</code>.
     </td>
     <td width="50%" valign="top">
       <h3>🔍 Deep Read-Only Target Profiling</h3>
@@ -87,8 +94,18 @@ flowchart LR
       Zero-network <code>s1shell codec decode|encode|inspect|hash</code> across 25 codecs (Base64/32/58/85, Hex, URL, HTML, Unicode, Punycode, ROT13/Caesar, Gzip/Zlib/Deflate, SAML XML, JWT, auto magic peeling), X.509 PEM/DER inspection, hash ID, and Shannon entropy.
     </td>
     <td width="50%" valign="top">
-      <h3>🤖 Defensive AI Skills, Pipelines &amp; Online MCP</h3>
-      Supports air-gapped <b>Ollama</b> (<code>--local-only</code>), <b>Anthropic</b>, <b>OpenAI-compatible</b>, and <b>Gemini</b> with <b>9 defensive AI skills</b> (+ custom <code>~/.s1shell/skills.d/*.yaml</code>), multi-stage <code>--pipeline</code> workflows, nonce-tagged prompt-injection guardrails, reversible NDA redaction (<code>--redact --restore</code>), citation grounding checks, bounded read-only <code>ai investigate</code> &amp; <code>ai chat</code>, plus an <b>Online Streamable HTTP + Local Stdio MCP server</b> (22–25 tools, native Prompts &amp; Resources, Bearer auth, &amp; Origin guard).
+      <h3>🧠 Defensive AI Skills, Pipelines &amp; ReAct Copilot</h3>
+      Air-gapped <b>Ollama</b> (<code>--local-only</code>), <b>Anthropic</b>, <b>OpenAI-compat</b>, &amp; <b>Gemini</b> with <b>9 defensive AI skills</b> (+ custom <code>~/.s1shell/skills.d/*.yaml</code>), <code>--pipeline</code> workflows, <code>--structured</code> JSON, nonce-tagged prompt-injection guardrails, reversible NDA redaction (<code>--redact --restore</code>), citation grounding checks, bounded read-only <code>ai investigate</code> &amp; <code>ai chat</code>.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <h3>📡 Online Streamable HTTP &amp; Local Stdio MCP</h3>
+      Pure-stdlib MCP <code>2025-03-26</code> server (<code>s1shell mcp serve|config|ping</code>) exposing <b>23 default read-only tools</b> (+3 opt-in scoped target tools = <b>26</b>), <b>4 live Resources</b>, and <b>9+ native Prompts</b>, hardened with Bearer auth, <code>Origin</code> DNS-rebinding guard, and <code>/healthz</code>.
+    </td>
+    <td width="50%" valign="top">
+      <h3>🧅 Zero-Leak Defensive Tor (<code>socks5h://</code>) &amp; v3 <code>.onion</code></h3>
+      Fail-closed <code>--tor</code> Analyst OPSEC for passive OSINT/CVE/SBOM/Cloud AI (auto-bypassing local Ollama/MCP), plus opt-in <code>--tor --tor-targets</code> routing target DoH DNS, SOCKS5h TLS handshakes, and single-GET HTTP with zero IP/DNS leaks, Direct-vs-Tor WAF diffs, and authorized v3 <code>.onion</code> auditing.
     </td>
   </tr>
 </table>
@@ -179,9 +196,11 @@ make check</code></pre>
 ### 1.2 Verify Your Setup
 
 ```bash
-s1shell --version       # expected: s1shell 0.4.2
-s1shell doctor          # expected: healthy=True, 81 passive fingerprint signatures
-s1shell audit verify    # expected: Audit Log Integrity: VALID
+s1shell --version         # expected: s1shell 0.4.2
+s1shell doctor            # expected: healthy=True, 81 signatures, 9 AI skills, tor_proxy status
+s1shell ai skills list    # expected: 9 bundled defensive AI skills
+s1shell tor status        # offline check for local Tor daemon & socksio readiness
+s1shell audit verify      # expected: Audit Log Integrity: VALID
 ```
 
 > [!NOTE]
@@ -204,6 +223,8 @@ All API keys are **optional** — S1shell works out of the box with unauthentica
 | **Anthropic Claude** | `--provider anthropic` / `ANTHROPIC_API_KEY` | [Anthropic Console Keys](https://console.anthropic.com/settings/keys) *(use `sk-ant-api*`, not `sk-ant-admin*`)* | Cloud defensive AI triage & remediation |
 | **OpenAI-Compatible** | `--provider openai_compat` / `OPENAI_API_KEY` | [OpenAI API Keys](https://platform.openai.com/api-keys) | OpenAI, OpenRouter, LiteLLM, or vLLM inference |
 | **Google Gemini** | `--provider gemini` / `GEMINI_API_KEY` | [Google AI Studio API Keys](https://aistudio.google.com/apikey) | Google Gemini defensive AI inference |
+| **Online MCP Server** | `--token` / `S1SHELL_MCP_TOKEN` | Local random secret *(or `--generate-token`)* | Required Bearer auth for non-loopback `--transport http` MCP binds |
+| **Tor SOCKS5h** | `--tor` / `S1SHELL_TOR`, `S1SHELL_TOR_TARGETS`, `S1SHELL_TOR_PROXY` | Local Tor daemon *(default `socks5h://127.0.0.1:9050`)* | Zero-DNS-leak Analyst OPSEC & opt-in zero-leak target/v3 `.onion` routing |
 | **State Directory** | `S1SHELL_HOME` | Local path override *(default `~/.s1shell`)* | Stores `scope.yaml`, `audit.log`, `cache.db`, & `.env` |
 
 #### Step 2 — Save Keys via CLI (`0600`)
@@ -229,7 +250,7 @@ s1shell ai env --provider ollama --model "llama3.1:8b"
 # s1shell ai env --provider gemini --set-key "AIza..." --model "gemini-2.5-flash"
 ```
 
-### 1.4 Optional Setup (Shell Completion, Custom Signatures, AI Skills & Online MCP Server)
+### 1.4 Optional Setup (Shell Completion, Custom Rules, Online MCP Server & Tor)
 
 <details>
 <summary><b>⌨️ Shell Tab-Completion (bash, zsh, fish)</b></summary>
@@ -360,13 +381,15 @@ s1shell mcp config antigravity --transport http --url http://127.0.0.1:8765/mcp 
 
 </details>
 
+<a id="defensive-tor-routing"></a>
 <details>
 <summary><b>🧅 Optional Defensive Tor (<code>socks5h://</code>) Routing — Analyst OPSEC &amp; Zero-Leak Target Assessment</b></summary>
 
 S1shell supports fail-closed local Tor (`socks5h://127.0.0.1:9050` / `9150`) with **zero local DNS leaks**, **zero silent clearnet fallback**, and **zero IP rotation/WAF evasion**:
 
 ```bash
-# 1. Start Tor on Kali Linux & verify readiness
+# 1. Start Tor on Kali Linux & verify readiness (if upgrading an existing pipx install, inject socksio once)
+pipx inject s1shell socksio
 sudo systemctl enable --now tor
 s1shell tor status       # offline check (tor binary, socksio, port 9050/9150)
 s1shell tor check        # live exit verification via check.torproject.org/api/ip
@@ -461,8 +484,9 @@ Assessment Posture Summary: https://www.target.com/ (93.184.216.34)
 
 | Mode | Scope & `--authorized` Required? | Commands |
 | --- | --- | --- |
-| **Zero-Target-Contact (Passive / Offline)** | No — never sends packets to `target.com` | `intel ct\|rdap\|lookup\|advisory`, `cve search\|get\|audit`, `codec decode\|encode\|inspect\|hash`, `fingerprint --from-profile`, `remediate`, `diff`, `report build`, `audit` |
-| **Authorized Target Mode (Read-Only)** | **Yes** — must match `scope.yaml` + `--authorized` | `assess <target \| --targets-file>`, `profile <target>`, `fingerprint <target>` |
+| **Zero-Target-Contact (Passive / Offline)** | No — never sends packets to `target.com` | `intel ct\|rdap\|lookup\|advisory`, `cve search\|get\|audit`, `codec decode\|encode\|inspect\|hash`, `fingerprint --from-profile`, `remediate`, `diff`, `report build`, `ai env\|skills\|analyze\|investigate\|chat`, `tor status\|check`, `mcp serve\|config\|ping` *(default)*, `audit`, `doctor` |
+| **Authorized Target Mode (Read-Only)** | **Yes** — must match `scope.yaml` + `--authorized` | `assess <target \| --targets-file>`, `profile <target>`, `fingerprint <target>`, `mcp serve --allow-scoped-targets --authorized` *(opt-in)* |
+| **Tor Zero-Leak Modes *(Optional)*** | `--tor` (no target scope) · `--tor --tor-targets` (**Yes** + public/v3 `.onion` only) | Add `--tor` for passive OSINT/CVE/SBOM/Cloud AI OPSEC; add `--tor --tor-targets --authorized` to route target DoH DNS, SOCKS5h TLS, & single-GET HTTP through Tor |
 
 > [!TIP]
 > **Want to practice safely on localhost first?** Authorize `127.0.0.1` (`s1shell scope add 127.0.0.1 --owner "Lab" --ref "LAB-1" --expires 2027-12-31`) and run `s1shell assess http://127.0.0.1:<port> --authorized --skip-cve --out-dir ./results/lab` against your own local test server.
@@ -483,6 +507,9 @@ s1shell intel rdap target.com
 # 3. Query passive VirusTotal, urlscan.io Search, GreyNoise, & RDAP reputation
 s1shell intel lookup www.target.com --sources vt,urlscan,rdap
 s1shell intel lookup 93.184.216.34 --sources vt,greynoise,rdap
+
+# Optional Analyst OPSEC: append `--tor` to route any Phase 1 passive lookup via local Tor SOCKS5h
+# s1shell intel ct target.com --tor
 ```
 
 ---
@@ -574,6 +601,11 @@ s1shell profile https://www.target.com --authorized \
   --format json --out ./results/profile.json
 s1shell fingerprint --from-profile ./results/profile.json \
   --format json --out ./results/fp.json
+
+# Optional zero-leak Tor edge perspective check (compare direct vs Tor exit WAF/header behavior)
+s1shell assess https://www.target.com --authorized \
+  --tor --tor-targets --skip-cve --out-dir ./results/target-tor
+s1shell diff ./results/target-com/assess.json ./results/target-tor/assess.json
 ```
 
 ---
@@ -644,7 +676,25 @@ s1shell codec hash --file ./results/target-com/report.html
 
 ---
 
-### Phase 5 — Remediation Playbooks, Redacted AI Triage, Reporting & Re-Test Drift
+<a id="defensive-ai-skills"></a>
+### Phase 5 — Remediation Playbooks, Defensive AI Skills, Reporting & Re-Test Drift
+
+<details>
+<summary><b>🧠 9 Built-In Defensive AI Skills (<code>s1shell ai skills list</code> + custom <code>~/.s1shell/skills.d/*.yaml</code>)</b></summary>
+
+| Skill ID (`--skill`) | Category | Defensive Focus |
+| --- | --- | --- |
+| `attack-path-modeling` | Threat Modeling | Maps posture gaps, EOL software, and CVEs to MITRE ATT&CK paths, blast radius, and chokepoint defenses |
+| `pentest-report-writer` | Reporting | Formal pentest findings with Business Impact, Root Cause, Evidence, CVSS/CWE/OWASP/ASVS, and Remediation |
+| `threat-intel-correlator` | OSINT | Cross-correlates CT SANs, RDAP, VirusTotal, GreyNoise, urlscan.io, and profile data for shadow assets & drift |
+| `sbom-supply-chain` | Supply Chain | Prioritizes OSV.dev lockfile & CycloneDX/SPDX SBOM vulnerabilities via KEV, EPSS, and safe patch groupings |
+| `zero-trust-hardening` | Remediation | Generates stack-tailored configs (NGINX, Apache, Caddy, Cloudflare, Express, DNS) fixing TLS/header/cookie gaps |
+| `compliance-mapper` | Governance | Maps findings to OWASP Top 10:2021, OWASP ASVS 4.0, CWE, NIST SP 800-53, ISO 27001, & PCI-DSS 4.0 |
+| `detection-engineering` | Blue Team | Produces defensive SIEM/Sigma/WAF detection rules & anomaly indicators for observed risks |
+| `retest-diff-brief` | Re-Test | Summarizes resolved findings, regressions, and remaining exposure from `s1shell diff` artifacts |
+| `token-crypto-auditor` | Crypto / Auth | Audits passively observed JWT hygiene, OIDC/JWKS issues, X.509 chains, SPKI pins, and TLS ciphers |
+
+</details>
 
 ```bash
 # 1. Deterministic offline hardening snippets (nginx, apache, caddy, express, dns, security.txt)
@@ -729,16 +779,20 @@ s1shell audit verify
 | `exit 3` (`UnauthorizedError`) | Running a target command non-interactively without confirmation | Pass `--authorized` explicitly |
 | `exit 4` (`PolicyGateError`) | Findings breached `--fail-on`, `--min-score`, or `--fail-on-regression` | Expected CI/CD gate failure — review findings or adjust thresholds / `--ignore-finding <ID>` |
 | Intel/AI feed skipped or rate-limited | Missing or misconfigured API key in `.env` | Run `s1shell doctor` and `s1shell intel env` / `s1shell ai env` to check masked key status |
+| `anthropic_api_key: WARN (sk-ant-admin*)` | `.env` contains an Anthropic Admin key instead of a standard inference key | Replace with a standard `sk-ant-api*` key from [Anthropic Console](https://console.anthropic.com/settings/keys), or switch to local Ollama (`s1shell ai env --provider ollama`) |
+| `Tor SOCKS5h routing requires socksio` | Existing `pipx` venv installed before `httpx[http2,socks]` was added | Run `pipx inject s1shell socksio` (or `pip install 'httpx[http2,socks]'`) and re-check with `s1shell tor status` |
+| `Tor SOCKS5h proxy is unreachable (fail-closed)` | Local Tor daemon is stopped (S1shell refuses to silently fall back to clearnet) | Start Tor via `sudo systemctl enable --now tor` (or pass `--tor-proxy socks5h://127.0.0.1:9150` for Tor Browser) and verify with `s1shell tor check` |
+| MCP HTTP `401 Unauthorized` or `403 Forbidden Origin` | Missing/wrong Bearer token or un-allowlisted browser `Origin` header | Pass `--token` / set `S1SHELL_MCP_TOKEN`, and pass `--allow-origin https://your-client.example` for web MCP clients |
 
 ### Command, Flag & Exit-Code Reference
 
 <details open>
-<summary><b>📋 Modules &amp; Commands (15 Modules)</b></summary>
+<summary><b>📋 Modules &amp; Commands (16 Modules)</b></summary>
 
 | Command | Network Contact | Purpose |
 | --- | --- | --- |
 | `s1shell assess <target \| --targets-file>` | Scoped target + NVD/KEV/EPSS (+ optional VT/GN/urlscan/RDAP with `--intel`) | Unified profile, fingerprint, EOL, CVE, intel, posture, playbook, & report bundle |
-| `s1shell scope add \| import \| list \| check \| remove \| expire` | DNS on `check` only | Manage authorized allow/exclude rules & bulk imports in `scope.yaml` |
+| `s1shell scope add \| import \| list \| check \| remove \| expire` | DNS on `check` only (DoH-over-Tor with `--tor --tor-targets`; zero DNS on `.onion`) | Manage authorized allow/exclude rules (domain, IP, CIDR, URL prefix, v3 `.onion`) & bulk imports |
 | `s1shell cve search \| get \| audit \| cache clear` | Public NVD / CVE.org / OSV.dev / GHSA / KEV / EPSS | CVE lookup, SSVC priority triage, & recursive lockfile/SBOM auditing |
 | `s1shell intel env \| lookup \| advisory \| ct \| rdap` | Public VT / GreyNoise / urlscan Search / GHSA / crt.sh / RDAP | Zero-target-contact passive threat intel, CT logs, RDAP, & `.env` key manager |
 | `s1shell codec decode \| encode \| inspect \| hash` | None (offline) | Offline Base64/Hex/URL/SAML/JWT/X.509/Gzip/Auto decoder, encoder, inspector, & hashes |
