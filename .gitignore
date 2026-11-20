@@ -1,20 +1,77 @@
+# Python bytecode & build artifacts
 __pycache__/
 *.py[cod]
 *$py.class
+*.so
 *.egg-info/
 .eggs/
 build/
 dist/
+wheels/
+*.whl
+*.tar.gz
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+.python-version
+
+# Test, lint, typecheck & coverage caches
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.tox/
+.nox/
+.hypothesis/
 .coverage
+.coverage.*
+coverage.xml
 htmlcov/
-.venv/
-venv/
-.s1shell/
-*.db
-*.log
+
+# Environment variables, API keys & local TLS keys
 .env
 .env.*
 !.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# S1shell local state, scope governance, cache & audit logs
+.s1shell/
+scope.yaml
+audit.log
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+*.log
+
+# S1shell generated assessment bundles & client reports (prevent accidental leaks)
+assessment-out/
+batch-out/
+assessments/
+reports/
+*.sarif
+profile.json
+fingerprint.json
+cves.json
+assess.json
+batch_summary.json
+batch_report.html
+report.html
+report.md
+targets.txt
+in_scope_urls.txt
+
+# Editor, IDE & OS metadata
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
