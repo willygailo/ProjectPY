@@ -1,0 +1,23 @@
+name: Feature Request
+description: Propose a defensive improvement aligned with S1shell's authorized-use scope
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Note: S1shell strictly prohibits offensive exploitation, active fuzzing, WAF bypass, brute force, or out-of-scope scanning. Please review `SECURITY.md` before submitting.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Proposed Defensive Capability
+      description: Describe the problem and proposed CLI/module improvement.
+    validations:
+      required: true
+  - type: checkboxes
+    id: policy
+    attributes:
+      label: Policy Alignment
+      options:
+        - label: This request does not introduce exploitation, evasion, brute force, or state-changing target requests.
+          required: true

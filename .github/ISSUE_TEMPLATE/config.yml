@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security Vulnerability Disclosure
+    url: https://github.com/s1shell/s1shell/security/advisories/new
+    about: Please report security issues privately via Security Advisories rather than public issues.

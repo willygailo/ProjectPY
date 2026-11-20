@@ -1,0 +1,652 @@
+version: 2
+signatures:
+  # --- Web Servers & Reverse Proxies ---
+  - vendor: "F5 / NGINX"
+    product: "nginx"
+    category: "web_server"
+    confidence: "high"
+    cpe_vendor: "f5"
+    cpe_product: "nginx"
+    headers:
+      - name: "server"
+        pattern: "(?i)\\bnginx(?:/([\\d.]+))?"
+
+  - vendor: "Apache Software Foundation"
+    product: "Apache HTTP Server"
+    category: "web_server"
+    confidence: "high"
+    cpe_vendor: "apache"
+    cpe_product: "http_server"
+    headers:
+      - name: "server"
+        pattern: "(?i)\\bApache(?:/([\\d.]+))?"
+
+  - vendor: "Caddy"
+    product: "Caddy"
+    category: "web_server"
+    confidence: "high"
+    cpe_vendor: "caddyserver"
+    cpe_product: "caddy"
+    headers:
+      - name: "server"
+        pattern: "(?i)^Caddy(?:/([\\d.]+))?\\b"
+
+  - vendor: "Microsoft"
+    product: "Microsoft-IIS"
+    category: "web_server"
+    confidence: "high"
+    cpe_vendor: "microsoft"
+    cpe_product: "internet_information_services"
+    headers:
+      - name: "server"
+        pattern: "(?i)\\bMicrosoft-IIS(?:/([\\d.]+))?"
+
+  - vendor: "Envoy Proxy"
+    product: "Envoy"
+    category: "web_server"
+    confidence: "high"
+    cpe_vendor: "envoyproxy"
+    cpe_product: "envoy"
+    headers:
+      - name: "server"
+        pattern: "(?i)^envoy$"
+      - name: "x-envoy-upstream-service-time"
+        pattern: "^\\d+$"
+
+  - vendor: "Traefik Labs"
+    product: "Traefik"
+    category: "web_server"
+    confidence: "high"
+    cpe_vendor: "traefik"
+    cpe_product: "traefik"
+    headers:
+      - name: "server"
+        pattern: "(?i)^traefik\\b"
+
+  - vendor: "LiteSpeed Technologies"
+    product: "LiteSpeed Web Server"
+    category: "web_server"
+    confidence: "high"
+    cpe_vendor: "litespeedtech"
+    cpe_product: "litespeed_web_server"
+    headers:
+      - name: "server"
+        pattern: "(?i)^LiteSpeed\\b"
+
+  - vendor: "OpenResty"
+    product: "OpenResty"
+    category: "web_server"
+    confidence: "high"
+    cpe_vendor: "openresty"
+    cpe_product: "openresty"
+    headers:
+      - name: "server"
+        pattern: "(?i)^openresty(?:/([\\d.]+))?"
+
+  - vendor: "HAProxy Technologies"
+    product: "HAProxy"
+    category: "web_server"
+    confidence: "medium"
+    cpe_vendor: "haproxy"
+    cpe_product: "haproxy"
+    headers:
+      - name: "via"
+        pattern: "(?i)\\bhaproxy\\b"
+      - name: "x-haproxy-server-state"
+        pattern: ".+"
+
+  - vendor: "Gunicorn"
+    product: "Gunicorn"
+    category: "web_server"
+    confidence: "high"
+    cpe_vendor: "gunicorn"
+    cpe_product: "gunicorn"
+    headers:
+      - name: "server"
+        pattern: "(?i)^gunicorn(?:/([\\d.]+))?"
+
+  - vendor: "Encode"
+    product: "Uvicorn"
+    category: "web_server"
+    confidence: "high"
+    headers:
+      - name: "server"
+        pattern: "(?i)^uvicorn\\b"
+
+  - vendor: "Pylons Project"
+    product: "Waitress"
+    category: "web_server"
+    confidence: "high"
+    cpe_vendor: "agendaless"
+    cpe_product: "waitress"
+    headers:
+      - name: "server"
+        pattern: "(?i)^waitress\\b"
+
+  - vendor: "Apache Software Foundation"
+    product: "Apache Tomcat"
+    category: "web_server"
+    confidence: "high"
+    cpe_vendor: "apache"
+    cpe_product: "tomcat"
+    headers:
+      - name: "server"
+        pattern: "(?i)\\bApache-Coyote(?:/([\\d.]+))?"
+    cookies:
+      - "JSESSIONID"
+
+  - vendor: "Eclipse Foundation"
+    product: "Eclipse Jetty"
+    category: "web_server"
+    confidence: "high"
+    cpe_vendor: "eclipse"
+    cpe_product: "jetty"
+    headers:
+      - name: "server"
+        pattern: "(?i)^Jetty\\(([\\d.]+)"
+
+  - vendor: "Microsoft"
+    product: "Kestrel"
+    category: "web_server"
+    confidence: "high"
+    headers:
+      - name: "server"
+        pattern: "(?i)^Kestrel$"
+
+  - vendor: "Lighttpd"
+    product: "lighttpd"
+    category: "web_server"
+    confidence: "high"
+    cpe_vendor: "lighttpd"
+    cpe_product: "lighttpd"
+    headers:
+      - name: "server"
+        pattern: "(?i)^lighttpd(?:/([\\d.]+))?"
+
+  - vendor: "Kong Inc."
+    product: "Kong API Gateway"
+    category: "web_server"
+    confidence: "high"
+    cpe_vendor: "konghq"
+    cpe_product: "kong"
+    headers:
+      - name: "via"
+        pattern: "(?i)\\bkong/([\\d.]+)"
+      - name: "x-kong-proxy-latency"
+        pattern: "^\\d+$"
+      - name: "server"
+        pattern: "(?i)^kong(?:/([\\d.]+))?"
+
+  - vendor: "Apache Software Foundation"
+    product: "Apache APISIX"
+    category: "web_server"
+    confidence: "high"
+    cpe_vendor: "apache"
+    cpe_product: "apisix"
+    headers:
+      - name: "server"
+        pattern: "(?i)^APISIX(?:/([\\d.]+))?"
+
+  - vendor: "Amazon Web Services"
+    product: "AWS Elastic Load Balancing"
+    category: "web_server"
+    confidence: "high"
+    headers:
+      - name: "server"
+        pattern: "(?i)^awselb(?:/([\\d.]+))?"
+    cnames:
+      - "(?i)\\.elb\\.amazonaws\\.com$"
+
+  - vendor: "Amazon Web Services"
+    product: "AWS API Gateway"
+    category: "web_server"
+    confidence: "high"
+    headers:
+      - name: "x-amzn-requestid"
+        pattern: ".+"
+      - name: "x-amz-apigw-id"
+        pattern: ".+"
+
+  - vendor: "Google"
+    product: "Google Frontend (GFE)"
+    category: "cdn"
+    confidence: "high"
+    headers:
+      - name: "server"
+        pattern: "(?i)^(?:gws|gse|Google Frontend|ESF)$"
+      - name: "via"
+        pattern: "(?i)\\b1\\.1 google\\b"
+
+  # --- CDNs & Edge Platforms ---
+  - vendor: "Cloudflare"
+    product: "Cloudflare CDN/WAF"
+    category: "cdn"
+    confidence: "high"
+    headers:
+      - name: "server"
+        pattern: "(?i)^cloudflare$"
+      - name: "cf-ray"
+        pattern: ".+"
+      - name: "cf-cache-status"
+        pattern: ".+"
+    cookies:
+      - "__cf_bm"
+      - "cf_clearance"
+    tls_issuer_pattern: "(?i)Cloudflare"
+    cnames:
+      - "(?i)\\.cdn\\.cloudflare\\.net$"
+
+  - vendor: "Amazon Web Services"
+    product: "Amazon CloudFront"
+    category: "cdn"
+    confidence: "high"
+    headers:
+      - name: "x-amz-cf-id"
+        pattern: ".+"
+      - name: "x-amz-cf-pop"
+        pattern: ".+"
+      - name: "server"
+        pattern: "(?i)^CloudFront$"
+      - name: "via"
+        pattern: "(?i)CloudFront"
+    cnames:
+      - "(?i)\\.cloudfront\\.net$"
+
+  - vendor: "Fastly"
+    product: "Fastly CDN"
+    category: "cdn"
+    confidence: "high"
+    headers:
+      - name: "x-fastly-request-id"
+        pattern: ".+"
+      - name: "fastly-debug-digest"
+        pattern: ".+"
+      - name: "x-served-by"
+        pattern: "(?i)^cache-"
+    cnames:
+      - "(?i)\\.fastly(?:lb)?\\.net$"
+
+  - vendor: "Akamai"
+    product: "Akamai Edge"
+    category: "cdn"
+    confidence: "high"
+    headers:
+      - name: "server"
+        pattern: "(?i)^AkamaiGHost$"
+      - name: "x-akamai-transformed"
+        pattern: ".+"
+      - name: "akamai-grn"
+        pattern: ".+"
+    cnames:
+      - "(?i)\\.(?:akamaiedge|edgesuite|edgekey|akamaitechnologies)\\.net$"
+
+  - vendor: "Varnish Software"
+    product: "Varnish Cache"
+    category: "cdn"
+    confidence: "medium"
+    cpe_vendor: "varnish-software"
+    cpe_product: "varnish_cache"
+    headers:
+      - name: "x-varnish"
+        pattern: ".+"
+      - name: "via"
+        pattern: "(?i)\\bvarnish\\b"
+
+  - vendor: "Vercel"
+    product: "Vercel Edge"
+    category: "cdn"
+    confidence: "high"
+    headers:
+      - name: "server"
+        pattern: "(?i)^Vercel$"
+      - name: "x-vercel-id"
+        pattern: ".+"
+      - name: "x-vercel-cache"
+        pattern: ".+"
+    cnames:
+      - "(?i)\\.vercel-dns\\.com$"
+
+  - vendor: "Netlify"
+    product: "Netlify Edge"
+    category: "cdn"
+    confidence: "high"
+    headers:
+      - name: "server"
+        pattern: "(?i)^Netlify$"
+      - name: "x-nf-request-id"
+        pattern: ".+"
+    cnames:
+      - "(?i)\\.netlify(?:\\.app|globalcdn\\.com)$"
+
+  - vendor: "Microsoft Azure"
+    product: "Azure Front Door"
+    category: "cdn"
+    confidence: "high"
+    headers:
+      - name: "x-azure-ref"
+        pattern: ".+"
+      - name: "x-fd-healthprobe"
+        pattern: ".+"
+    cnames:
+      - "(?i)\\.azurefd\\.net$"
+
+  - vendor: "BunnyWay"
+    product: "BunnyCDN"
+    category: "cdn"
+    confidence: "high"
+    headers:
+      - name: "server"
+        pattern: "(?i)^BunnyCDN"
+      - name: "cdn-pullzone"
+        pattern: "^\\d+$"
+    cnames:
+      - "(?i)\\.b-cdn\\.net$"
+
+  - vendor: "KeyCDN"
+    product: "KeyCDN"
+    category: "cdn"
+    confidence: "high"
+    headers:
+      - name: "server"
+        pattern: "(?i)^keycdn-engine$"
+      - name: "x-edge-location"
+        pattern: ".+"
+    cnames:
+      - "(?i)\\.kxcdn\\.com$"
+
+  - vendor: "GitHub"
+    product: "GitHub Pages"
+    category: "cdn"
+    confidence: "high"
+    headers:
+      - name: "server"
+        pattern: "(?i)^GitHub\\.com$"
+      - name: "x-github-request-id"
+        pattern: ".+"
+    cnames:
+      - "(?i)\\.github\\.io$"
+
+  - vendor: "Shopify"
+    product: "Shopify"
+    category: "cdn"
+    confidence: "high"
+    headers:
+      - name: "x-shopid"
+        pattern: "^\\d+$"
+      - name: "x-shopify-stage"
+        pattern: ".+"
+    cnames:
+      - "(?i)\\.myshopify\\.com$|shops\\.myshopify\\.com$"
+
+  # --- WAFs ---
+  - vendor: "Amazon Web Services"
+    product: "AWS WAF"
+    category: "waf"
+    confidence: "high"
+    headers:
+      - name: "x-amzn-waf-action"
+        pattern: ".+"
+    cookies:
+      - "aws-waf-token"
+
+  - vendor: "Imperva"
+    product: "Imperva / Incapsula"
+    category: "waf"
+    confidence: "high"
+    headers:
+      - name: "x-cdn"
+        pattern: "(?i)Imperva|Incapsula"
+      - name: "x-iinfo"
+        pattern: ".+"
+    cookie_patterns:
+      - "^visid_incap_"
+      - "^incap_ses_"
+
+  - vendor: "Sucuri"
+    product: "Sucuri CloudProxy"
+    category: "waf"
+    confidence: "high"
+    headers:
+      - name: "server"
+        pattern: "(?i)^Sucuri/Cloudproxy"
+      - name: "x-sucuri-id"
+        pattern: ".+"
+      - name: "x-sucuri-cache"
+        pattern: ".+"
+
+  - vendor: "F5"
+    product: "F5 BIG-IP"
+    category: "waf"
+    confidence: "medium"
+    cpe_vendor: "f5"
+    cpe_product: "big-ip_local_traffic_manager"
+    headers:
+      - name: "server"
+        pattern: "(?i)\\bBigIP\\b"
+    cookie_patterns:
+      - "^BIGipServer"
+
+  - vendor: "ArvanCloud"
+    product: "ArvanCloud CDN/WAF"
+    category: "waf"
+    confidence: "high"
+    headers:
+      - name: "server"
+        pattern: "(?i)^ArvanCloud$"
+      - name: "ar-poweredby"
+        pattern: ".+"
+
+  # --- Runtimes, Frameworks, CMS & DevOps Platforms ---
+  - vendor: "OpenJS Foundation"
+    product: "Express"
+    category: "framework"
+    confidence: "high"
+    cpe_vendor: "expressjs"
+    cpe_product: "express"
+    headers:
+      - name: "x-powered-by"
+        pattern: "(?i)^Express$"
+
+  - vendor: "PHP Group"
+    product: "PHP"
+    category: "runtime"
+    confidence: "high"
+    cpe_vendor: "php"
+    cpe_product: "php"
+    headers:
+      - name: "x-powered-by"
+        pattern: "(?i)\\bPHP(?:/([\\d.]+))?"
+    cookies:
+      - "PHPSESSID"
+
+  - vendor: "Microsoft"
+    product: "ASP.NET"
+    category: "framework"
+    confidence: "high"
+    cpe_vendor: "microsoft"
+    cpe_product: "asp.net"
+    headers:
+      - name: "x-aspnet-version"
+        pattern: "([\\d.]+)"
+      - name: "x-powered-by"
+        pattern: "(?i)\\bASP\\.NET\\b"
+    cookies:
+      - "ASP.NET_SessionId"
+
+  - vendor: "Vercel"
+    product: "Next.js"
+    category: "framework"
+    confidence: "high"
+    cpe_vendor: "vercel"
+    cpe_product: "next.js"
+    headers:
+      - name: "x-powered-by"
+        pattern: "(?i)^Next\\.js(?:\\s+([\\d.]+))?"
+    html_hints:
+      - "nextjs"
+
+  - vendor: "Nuxt"
+    product: "Nuxt.js"
+    category: "framework"
+    confidence: "medium"
+    cpe_vendor: "nuxt"
+    cpe_product: "nuxt"
+    headers:
+      - name: "x-powered-by"
+        pattern: "(?i)^Nuxt"
+    html_hints:
+      - "nuxt"
+
+  - vendor: "Django Software Foundation"
+    product: "Django"
+    category: "framework"
+    confidence: "low"
+    cpe_vendor: "djangoproject"
+    cpe_product: "django"
+    cookies:
+      - "csrftoken"
+    html_hints:
+      - "django"
+
+  - vendor: "Laravel"
+    product: "Laravel"
+    category: "framework"
+    confidence: "medium"
+    cpe_vendor: "laravel"
+    cpe_product: "laravel"
+    cookies:
+      - "laravel_session"
+    html_hints:
+      - "laravel"
+
+  - vendor: "Ruby on Rails"
+    product: "Ruby on Rails"
+    category: "framework"
+    confidence: "medium"
+    cpe_vendor: "rubyonrails"
+    cpe_product: "rails"
+    headers:
+      - name: "x-powered-by"
+        pattern: "(?i)Phusion Passenger"
+    html_hints:
+      - "rails"
+
+  - vendor: "Pallets"
+    product: "Flask / Werkzeug"
+    category: "framework"
+    confidence: "high"
+    cpe_vendor: "palletsprojects"
+    cpe_product: "werkzeug"
+    headers:
+      - name: "server"
+        pattern: "(?i)\\bWerkzeug(?:/([\\d.]+))?"
+
+  - vendor: "VMware"
+    product: "Spring Boot"
+    category: "framework"
+    confidence: "medium"
+    cpe_vendor: "vmware"
+    cpe_product: "spring_boot"
+    headers:
+      - name: "x-application-context"
+        pattern: ".+"
+
+  - vendor: "Symfony"
+    product: "Symfony"
+    category: "framework"
+    confidence: "medium"
+    cpe_vendor: "sensiolabs"
+    cpe_product: "symfony"
+    headers:
+      - name: "x-debug-token"
+        pattern: "^[a-f0-9]+$"
+
+  - vendor: "WordPress"
+    product: "WordPress"
+    category: "framework"
+    confidence: "high"
+    cpe_vendor: "wordpress"
+    cpe_product: "wordpress"
+    headers:
+      - name: "x-pingback"
+        pattern: "(?i)xmlrpc\\.php$"
+      - name: "link"
+        pattern: "(?i)https://api\\.w\\.org/"
+    cookie_patterns:
+      - "^wordpress_logged_in_"
+    html_hints:
+      - "wordpress"
+    meta_generator_pattern: "(?i)WordPress(?:\\s+([\\d.]+))?"
+
+  - vendor: "Drupal"
+    product: "Drupal"
+    category: "framework"
+    confidence: "high"
+    cpe_vendor: "drupal"
+    cpe_product: "drupal"
+    headers:
+      - name: "x-generator"
+        pattern: "(?i)Drupal\\s+([\\d.]+)"
+      - name: "x-drupal-cache"
+        pattern: ".+"
+      - name: "x-drupal-dynamic-cache"
+        pattern: ".+"
+    html_hints:
+      - "drupal"
+    meta_generator_pattern: "(?i)Drupal(?:\\s+([\\d.]+))?"
+
+  - vendor: "Ghost Foundation"
+    product: "Ghost"
+    category: "framework"
+    confidence: "high"
+    cpe_vendor: "ghost"
+    cpe_product: "ghost"
+    meta_generator_pattern: "(?i)Ghost(?:\\s+([\\d.]+))?"
+
+  - vendor: "Hugo"
+    product: "Hugo"
+    category: "framework"
+    confidence: "high"
+    meta_generator_pattern: "(?i)Hugo(?:\\s+([\\d.]+))?"
+
+  - vendor: "Google"
+    product: "Angular"
+    category: "framework"
+    confidence: "medium"
+    cpe_vendor: "angular"
+    cpe_product: "angular"
+    html_hints:
+      - "angular"
+
+  - vendor: "Grafana Labs"
+    product: "Grafana"
+    category: "framework"
+    confidence: "high"
+    cpe_vendor: "grafana"
+    cpe_product: "grafana"
+    cookies:
+      - "grafana_session"
+
+  - vendor: "Jenkins Project"
+    product: "Jenkins"
+    category: "framework"
+    confidence: "high"
+    cpe_vendor: "jenkins"
+    cpe_product: "jenkins"
+    headers:
+      - name: "x-jenkins"
+        pattern: "([\\d.]+)"
+      - name: "x-hudson"
+        pattern: "([\\d.]+)"
+
+  - vendor: "GitLab"
+    product: "GitLab"
+    category: "framework"
+    confidence: "high"
+    cpe_vendor: "gitlab"
+    cpe_product: "gitlab"
+    cookies:
+      - "_gitlab_session"
+    headers:
+      - name: "x-gitlab-meta"
+        pattern: ".+"

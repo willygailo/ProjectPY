@@ -1,0 +1,21 @@
+{
+  "cveMetadata": {
+    "cveId": "CVE-2021-23017",
+    "state": "PUBLISHED"
+  },
+  "containers": {
+    "cna": {
+      "descriptions": [
+        {
+          "lang": "en",
+          "value": "Authoritative CVE.org description: Off-by-one DNS resolver overwrite in nginx 0.6.18-1.20.0."
+        }
+      ],
+      "references": [
+        {
+          "url": "https://mailman.nginx.org/pipermail/nginx-announce/2021/000300.html"
+        }
+      ]
+    }
+  }
+}

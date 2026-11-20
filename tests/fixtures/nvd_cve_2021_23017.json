@@ -1,0 +1,80 @@
+{
+  "resultsPerPage": 2,
+  "startIndex": 0,
+  "totalResults": 2,
+  "vulnerabilities": [
+    {
+      "cve": {
+        "id": "CVE-2021-23017",
+        "published": "2021-06-01T14:15:08.123",
+        "lastModified": "2024-11-21T06:00:00.000",
+        "descriptions": [
+          {
+            "lang": "en",
+            "value": "A security issue in nginx resolver was identified, which might allow an attacker who is able to forge UDP packets from the DNS server to cause 1-byte memory overwrite."
+          }
+        ],
+        "metrics": {
+          "cvssMetricV31": [
+            {
+              "type": "Primary",
+              "cvssData": {
+                "version": "3.1",
+                "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H",
+                "baseScore": 8.1,
+                "baseSeverity": "HIGH"
+              }
+            }
+          ]
+        },
+        "configurations": [
+          {
+            "nodes": [
+              {
+                "cpeMatch": [
+                  {
+                    "vulnerable": true,
+                    "criteria": "cpe:2.3:a:f5:nginx:1.18.0:*:*:*:*:*:*:*"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "references": [
+          {
+            "url": "https://nginx.org/en/security_advisories.html"
+          }
+        ]
+      }
+    },
+    {
+      "cve": {
+        "id": "CVE-2021-3618",
+        "published": "2021-08-10T10:00:00.000",
+        "lastModified": "2024-01-01T00:00:00.000",
+        "descriptions": [
+          {
+            "lang": "en",
+            "value": "ALPACA technique TLS cross-protocol issue in nginx mail proxy."
+          }
+        ],
+        "metrics": {
+          "cvssMetricV31": [
+            {
+              "type": "Primary",
+              "cvssData": {
+                "version": "3.1",
+                "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:N/A:N",
+                "baseScore": 5.9,
+                "baseSeverity": "MEDIUM"
+              }
+            }
+          ]
+        },
+        "configurations": [],
+        "references": []
+      }
+    }
+  ]
+}

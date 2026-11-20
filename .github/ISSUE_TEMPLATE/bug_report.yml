@@ -1,0 +1,29 @@
+name: Bug Report
+description: Report a bug or unexpected behavior in S1shell
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Clear description of the bug and what you expected to happen.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce
+      description: Command run (redact private targets/API keys) and observed output.
+      placeholder: |
+        s1shell doctor
+        s1shell profile ...
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Paste `s1shell --version`, `python3 --version`, and OS details (e.g., Kali Linux).
+    validations:
+      required: true

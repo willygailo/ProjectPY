@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>S1shell Authorized Assessment Report</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --ok: #4ade80;
+      --warn: #fbbf24;
+      --bad: #f87171;
+      --crit: #fb7185;
+    }
+    body {
+      font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      margin: 0;
+      padding: 2rem;
+      line-height: 1.5;
+    }
+    .container { max-width: 1120px; margin: 0 auto; }
+    h1, h2, h3, h4 { color: #f8fafc; margin-top: 1.5rem; }
+    .banner {
+      background: #082f49;
+      border-left: 4px solid var(--accent);
+      padding: 0.75rem 1rem;
+      margin-bottom: 1.5rem;
+      font-size: 0.9rem;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1.25rem;
+      margin-bottom: 1.25rem;
+    }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+      gap: 0.75rem;
+      margin-top: 0.5rem;
+    }
+    .stat {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.75rem;
+    }
+    .stat-label { color: var(--muted); font-size: 0.75rem; text-transform: uppercase; }
+    .stat-value { font-size: 1.3rem; font-weight: 700; color: #f8fafc; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 0.5rem;
+      font-size: 0.88rem;
+    }
+    th, td {
+      text-align: left;
+      padding: 0.5rem 0.65rem;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+    }
+    th { color: var(--muted); font-weight: 600; }
+    .badge {
+      display: inline-block;
+      padding: 0.15rem 0.5rem;
+      border-radius: 999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .ok, .LOW, .MINIMAL { background: #14532d; color: var(--ok); }
+    .weak, .MEDIUM, .MODERATE { background: #78350f; color: var(--warn); }
+    .missing, .HIGH { background: #7f1d1d; color: var(--bad); }
+    .CRITICAL { background: #881337; color: var(--crit); }
+    .INFO { background: #1e3a5f; color: var(--accent); }
+    code {
+      background: #0f172a;
+      padding: 0.1rem 0.35rem;
+      border-radius: 4px;
+      font-size: 0.85em;
+    }
+    pre {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 1rem;
+      overflow-x: auto;
+      white-space: pre-wrap;
+      font-size: 0.86rem;
+    }
+    .muted { color: var(--muted); }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>S1shell Authorized Assessment Report</h1>
+    <div class="banner">
+      Authorized Defensive Assessment &mdash; Read-Only Profiling &amp; Vulnerability Triage Only
+    </div>
+
+    <div class="card">
+      <h2>Executive Summary</h2>
+      <div class="stats">
+        {% if bundle.posture %}
+        <div class="stat">
+          <div class="stat-label">Posture Score</div>
+          <div class="stat-value">{{ bundle.posture.score }}/100 ({{ bundle.posture.grade }})</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Risk Level</div>
+          <div class="stat-value"><span class="badge {{ bundle.posture.risk_level }}">{{ bundle.posture.risk_level }}</span></div>
+        </div>
+        {% endif %}
+        <div class="stat"><div class="stat-label">Profiles</div><div class="stat-value">{{ summary.profiles }}</div></div>
+        <div class="stat"><div class="stat-label">Missing Headers</div><div class="stat-value">{{ summary.missing_headers }}</div></div>
+        <div class="stat"><div class="stat-label">Weak Headers</div><div class="stat-value">{{ summary.weak_headers }}</div></div>
+        <div class="stat"><div class="stat-label">Cookie Flags Gaps</div><div class="stat-value">{{ summary.insecure_cookies }}</div></div>
+        <div class="stat"><div class="stat-label">TLS Warnings</div><div class="stat-value">{{ summary.tls_warnings }}</div></div>
+        <div class="stat"><div class="stat-label">Tech Matches</div><div class="stat-value">{{ summary.fingerprint_matches }}</div></div>
+        <div class="stat"><div class="stat-label">CVEs (High/Crit)</div><div class="stat-value">{{ summary.cve_total }} ({{ summary.high_critical_cves }})</div></div>
+        {% if summary.kev_cves %}
+        <div class="stat"><div class="stat-label">CISA KEV CVEs</div><div class="stat-value">{{ summary.kev_cves }}</div></div>
+        {% endif %}
+      </div>
+
+      {% if bundle.posture and bundle.posture.get("category_scores") %}
+      <h3>Domain Posture Breakdown</h3>
+      <div class="stats">
+        {% for dom, dom_score in bundle.posture.category_scores.items() %}
+        <div class="stat">
+          <div class="stat-label">{{ dom }}</div>
+          <div class="stat-value">{{ dom_score }}%</div>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+
+    {% if bundle.findings %}
+    <div class="card">
+      <h2>Prioritized Findings &amp; Remediation</h2>
+      <table>
+        <thead>
+          <tr><th>ID</th><th>Severity</th><th>Category</th><th>CWE / ASVS</th><th>Title &amp; Evidence</th><th>Remediation</th></tr>
+        </thead>
+        <tbody>
+        {% for f in bundle.findings %}
+          <tr>
+            <td><code>{{ f.id }}</code></td>
+            <td><span class="badge {{ f.severity }}">{{ f.severity }}</span></td>
+            <td>{{ f.category }}</td>
+            <td>
+              {% if f.get("cwe") %}<code>{{ f.cwe }}</code>{% else %}—{% endif %}
+              {% if f.get("asvs") %}<div class="muted"><code>{{ f.asvs }}</code></div>{% endif %}
+            </td>
+            <td>
+              <strong>{{ f.title }}</strong>
+              <div class="muted"><code>{{ f.evidence }}</code></div>
+            </td>
+            <td>{{ f.remediation }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+
+    {% if bundle.ai_analysis %}
+    <div class="card">
+      <h2>AI Defensive Triage <span class="muted">({{ bundle.ai_analysis.get("provider", "anthropic") }} / {{ bundle.ai_analysis.model }})</span></h2>
+      {% if bundle.ai_analysis.get("redacted") %}
+      <p class="muted">Telemetry was redacted before cloud inference.</p>
+      {% endif %}
+      <pre>{{ bundle.ai_analysis.analysis }}</pre>
+    </div>
+    {% endif %}
+
+    <div class="card">
+      <h2>Assessment Metadata</h2>
+      <table>
+        <tr><th>Generated (UTC)</th><td>{{ bundle.metadata.generated_at_utc }}</td></tr>
+        <tr><th>Operator</th><td>{{ bundle.metadata.operator }}</td></tr>
+        <tr><th>S1shell Version</th><td>{{ bundle.metadata.tool_version }}</td></tr>
+      </table>
+
+      <h3>Scope Entries Referenced</h3>
+      {% if bundle.metadata.scope_entries %}
+      <table>
+        <thead>
+          <tr><th>ID</th><th>Target</th><th>Owner</th><th>Auth Ref</th><th>Expires</th></tr>
+        </thead>
+        <tbody>
+        {% for entry in bundle.metadata.scope_entries %}
+          <tr>
+            <td><code>{{ entry.id }}</code></td>
+            <td>{{ entry.get("target", "—") }}</td>
+            <td>{{ entry.get("owner", "—") }}</td>
+            <td>{{ entry.get("auth_ref", "—") }}</td>
+            <td>{{ entry.get("expires_at", "—") }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <p class="muted">No target scope entries referenced (offline CVE research only).</p>
+      {% endif %}
+    </div>
+
+    {% if bundle.profiles %}
+    <h2>Target Profiles</h2>
+    {% for prof in bundle.profiles %}
+    <div class="card">
+      <h3>{{ prof.url }} <span class="muted">(IP: {{ prof.pinned_ip }})</span></h3>
+      <p>
+        Status: <strong>{{ prof.protocol.status_code }}</strong> |
+        HTTP: <code>{{ prof.protocol.http_version }}</code> |
+        ALPN: <code>{{ prof.protocol.alpn_protocol or "none" }}</code> |
+        HTTP/3 Advertised: <strong>{{ "Yes" if prof.protocol.http3_advertised else "No" }}</strong>
+        {% if prof.protocol.redirect_location %}
+        | Redirect Location (not followed): <code>{{ prof.protocol.redirect_location }}</code>
+        {% endif %}
+      </p>
+
+      {% if prof.dns %}
+      <p>
+        <strong>DNS:</strong>
+        A=<code>{{ prof.dns.a | join(", ") or "none" }}</code>,
+        AAAA=<code>{{ prof.dns.aaaa | join(", ") or "none" }}</code>,
+        CNAME=<code>{{ prof.dns.cname | join(", ") or "none" }}</code>
+        {% if prof.dns.get("security_checked") %}
+        <br><strong>DNS Hygiene:</strong>
+        CAA=<code>{{ prof.dns.get("caa", []) | join("; ") or "none" }}</code> |
+        SPF=<code>{{ prof.dns.get("spf") or "none" }}</code> |
+        DMARC=<code>{{ prof.dns.get("dmarc") or "none" }}</code> |
+        DNSSEC=<strong>{{ "Yes" if prof.dns.get("dnssec_present") else "No" }}</strong>
+        {% endif %}
+        {% if prof.dns.errors %}
+        <br><span class="muted">DNS Errors: <code>{{ prof.dns.errors | join("; ") }}</code></span>
+        {% endif %}
+      </p>
+      {% endif %}
+
+      {% if prof.tls and prof.tls.applicable %}
+      <p>
+        <strong>TLS:</strong>
+        {{ prof.tls.negotiated_version }} ({{ prof.tls.cipher_suite }}) |
+        Verified: <strong>{{ "Yes" if prof.tls.verified else "No" }}</strong> |
+        Issuer: <code>{{ prof.tls.issuer or "—" }}</code> |
+        Expires: {{ prof.tls.not_after or "—" }} ({{ prof.tls.days_remaining }} days)
+        {% if prof.tls.get("key_type") %}
+        <br>Key: <code>{{ prof.tls.key_type }} {{ prof.tls.get("key_size") or "" }}</code> |
+        Sig: <code>{{ prof.tls.get("signature_algorithm") or "—" }}</code> |
+        SCT: <strong>{{ "Yes" if prof.tls.get("has_sct") else "No" }}</strong>
+        {% endif %}
+        {% if prof.tls.supported_versions %}
+        <br>Supported Versions: <code>{{ prof.tls.supported_versions | join(", ") }}</code>
+        {% endif %}
+        {% if prof.tls.get("cipher_weaknesses") %}
+        <br>Cipher Weaknesses: <code>{{ prof.tls.cipher_weaknesses | join("; ") }}</code>
+        {% endif %}
+        {% if prof.tls.sans %}
+        <br>SANs: <code>{{ prof.tls.sans | join(", ") }}</code>
+        {% endif %}
+        {% if prof.tls.verification_error %}
+        <br>Verification Error: <code>{{ prof.tls.verification_error }}</code>
+        {% endif %}
+      </p>
+      {% endif %}
+
+      <h4>Security Headers</h4>
+      <table>
+        <thead><tr><th>Header</th><th>Status</th><th>Value</th><th>Notes</th></tr></thead>
+        <tbody>
+        {% for h in prof.headers.security_headers %}
+          <tr>
+            <td><code>{{ h.header }}</code></td>
+            <td><span class="badge {{ h.status }}">{{ h.status }}</span></td>
+            <td><code>{{ h.value or "—" }}</code></td>
+            <td>{{ h.note }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+
+      {% if prof.headers.banner_disclosures %}
+      <h4>Banner Disclosures</h4>
+      <ul>
+        {% for b in prof.headers.banner_disclosures %}
+        <li><code>{{ b.header }}: {{ b.value }}</code></li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+
+      {% if prof.headers.cookies %}
+      <h4>Set-Cookie Attributes</h4>
+      <table>
+        <thead><tr><th>Cookie</th><th>Secure</th><th>HttpOnly</th><th>SameSite</th></tr></thead>
+        <tbody>
+        {% for c in prof.headers.cookies %}
+          <tr>
+            <td><code>{{ c.name }}</code></td>
+            <td><span class="badge {{ 'ok' if c.secure else 'missing' }}">{{ "yes" if c.secure else "no" }}</span></td>
+            <td><span class="badge {{ 'ok' if c.http_only else 'missing' }}">{{ "yes" if c.http_only else "no" }}</span></td>
+            <td><code>{{ c.same_site or "—" }}</code></td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+
+      {% if prof.get("html") and prof.html.get("analyzed") %}
+      <h4>Passive HTML Telemetry</h4>
+      <p>
+        Title: <code>{{ prof.html.get("title") or "—" }}</code> |
+        Generator: <code>{{ prof.html.get("meta_generator") or "—" }}</code> |
+        Missing SRI Assets: <strong>{{ (prof.html.get("external_scripts_without_sri", []) | length) + (prof.html.get("external_styles_without_sri", []) | length) }}</strong> |
+        Mixed Content: <strong>{{ prof.html.get("mixed_content_urls", []) | length }}</strong>
+        {% if prof.html.get("detected_libraries") %}
+        <br>Client Libraries: <code>{{ prof.html.detected_libraries | join(", ") }}</code>
+        {% endif %}
+      </p>
+      {% endif %}
+    </div>
+    {% endfor %}
+    {% endif %}
+
+    {% if bundle.fingerprints %}
+    <h2>Passive Fingerprints</h2>
+    {% for fp in bundle.fingerprints %}
+    <div class="card">
+      <h3>{{ fp.target }} <span class="muted">(mode: {{ fp.mode }})</span></h3>
+      {% if fp.matches %}
+      <table>
+        <thead><tr><th>Product</th><th>Version</th><th>Vendor</th><th>Category</th><th>Confidence</th><th>CPE</th><th>Evidence</th></tr></thead>
+        <tbody>
+        {% for m in fp.matches %}
+          <tr>
+            <td>{{ m.product }}</td>
+            <td><code>{{ m.get("version") or "—" }}</code></td>
+            <td>{{ m.vendor }}</td>
+            <td>{{ m.category }}</td>
+            <td>{{ m.confidence }}</td>
+            <td><code>{{ m.get("cpe") or "—" }}</code></td>
+            <td><code>{{ m.evidence | join("; ") }}</code></td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <p class="muted">No passive technology signatures matched.</p>
+      {% endif %}
+    </div>
+    {% endfor %}
+    {% endif %}
+
+    {% if bundle.cves %}
+    <h2>CVE Triage Findings</h2>
+    {% for cve_bundle in bundle.cves %}
+    <div class="card">
+      <table>
+        <thead><tr><th>CVE ID</th><th>CVSS</th><th>Severity</th><th>KEV / EPSS</th><th>Published</th><th>Description</th></tr></thead>
+        <tbody>
+        {% for rec in cve_bundle.records %}
+          <tr>
+            <td><code>{{ rec.cve_id }}</code></td>
+            <td>{{ rec.cvss.base_score if rec.cvss else "—" }}</td>
+            <td>{{ rec.cvss.severity if rec.cvss else "—" }}</td>
+            <td>
+              {% if rec.get("in_kev") %}<span class="badge CRITICAL">CISA KEV</span>{% endif %}
+              {% if rec.get("epss_score") is not none %}<div><code>EPSS {{ "%.1f%%" | format(rec.epss_score * 100) }}</code></div>{% endif %}
+              {% if not rec.get("in_kev") and rec.get("epss_score") is none %}—{% endif %}
+            </td>
+            <td>{{ rec.published[:10] }}</td>
+            <td>
+              {{ rec.description }}
+              {% if rec.get("cve_org_url") %}
+              <div class="muted"><code>{{ rec.cve_org_url }}</code></div>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endfor %}
+    {% endif %}
+  </div>
+</body>
+</html>

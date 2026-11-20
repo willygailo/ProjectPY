@@ -1,0 +1,31 @@
+name: Passive Fingerprint Signature
+description: Suggest a new strictly passive header, cookie, or TLS issuer signature
+title: "[Signature]: "
+labels: ["signatures"]
+body:
+  - type: input
+    id: product
+    attributes:
+      label: Vendor & Product Name
+      placeholder: "e.g., Caddy / Caddy"
+    validations:
+      required: true
+  - type: dropdown
+    id: category
+    attributes:
+      label: Category
+      options:
+        - web_server
+        - cdn
+        - waf
+        - framework
+        - runtime
+    validations:
+      required: true
+  - type: textarea
+    id: indicators
+    attributes:
+      label: Strictly Passive Indicators
+      description: Standard HTTP response headers, Set-Cookie names, or TLS certificate issuer patterns observed on a normal GET request (no active probing).
+    validations:
+      required: true

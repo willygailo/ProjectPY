@@ -1,0 +1,140 @@
+# S1shell Authorized Assessment Report
+
+> Authorized Defensive Assessment — Read-Only Profiling & Vulnerability Triage Only
+
+## Executive Summary
+
+{% if bundle.posture -%}
+- **Posture Score:** `{{ bundle.posture.score }}/100` (Grade `{{ bundle.posture.grade }}`, Risk `{{ bundle.posture.risk_level }}`)
+{% endif -%}
+- **Profiles:** {{ summary.profiles }}
+- **Missing Security Headers:** {{ summary.missing_headers }}
+- **Weak Security Headers:** {{ summary.weak_headers }}
+- **Cookies Missing Flags:** {{ summary.insecure_cookies }}
+- **TLS Warnings:** {{ summary.tls_warnings }}
+- **Passive Tech Matches:** {{ summary.fingerprint_matches }}
+- **CVEs Reviewed (High/Critical):** {{ summary.cve_total }} ({{ summary.high_critical_cves }})
+{% if summary.kev_cves -%}
+- **CISA KEV CVEs:** {{ summary.kev_cves }}
+{% endif %}
+
+{% if bundle.findings %}
+## Prioritized Findings & Remediation
+
+| ID | Severity | Category | CWE | ASVS | Title | Evidence | Remediation |
+|---|---|---|---|---|---|---|---|
+{% for f in bundle.findings -%}
+| `{{ f.id }}` | {{ f.severity }} | {{ f.category }} | `{{ f.get("cwe") | md_cell }}` | `{{ f.get("asvs") | md_cell }}` | {{ f.title | md_cell }} | `{{ f.evidence | md_cell }}` | {{ f.remediation | md_cell }} |
+{% endfor %}
+{% endif %}
+
+{% if bundle.ai_analysis %}
+## AI Defensive Triage (`{{ bundle.ai_analysis.get("provider", "anthropic") }}` / `{{ bundle.ai_analysis.model }}`)
+
+{{ bundle.ai_analysis.analysis }}
+{% endif %}
+
+## Assessment Metadata
+
+- **Generated (UTC):** {{ bundle.metadata.generated_at_utc }}
+- **Operator:** {{ bundle.metadata.operator }}
+- **S1shell Version:** {{ bundle.metadata.tool_version }}
+
+### Scope Entries Referenced
+{% if bundle.metadata.scope_entries %}
+| ID | Target | Owner | Auth Ref | Expires |
+|---|---|---|---|---|
+{% for entry in bundle.metadata.scope_entries -%}
+| `{{ entry.id }}` | {{ entry.get("target", "—") | md_cell }} | {{ entry.get("owner", "—") | md_cell }} | {{ entry.get("auth_ref", "—") | md_cell }} | {{ entry.get("expires_at", "—") | md_cell }} |
+{% endfor %}
+{% else %}
+_No target scope entries referenced (offline CVE research only)._
+{% endif %}
+
+{% if bundle.profiles %}
+## Target Profiles
+{% for prof in bundle.profiles %}
+### {{ prof.url }} (`{{ prof.pinned_ip }}`)
+
+- **HTTP Status:** {{ prof.protocol.status_code }} ({{ prof.protocol.http_version }}, ALPN: `{{ prof.protocol.alpn_protocol or "none" }}`)
+- **HTTP/3 Advertised (`Alt-Svc`):** {{ "Yes" if prof.protocol.http3_advertised else "No" }}
+{% if prof.protocol.redirect_location -%}
+- **Redirect Location (not followed):** `{{ prof.protocol.redirect_location }}`
+{% endif -%}
+{% if prof.dns -%}
+- **DNS:** A=`{{ prof.dns.a | join(", ") or "none" }}`, AAAA=`{{ prof.dns.aaaa | join(", ") or "none" }}`, CNAME=`{{ prof.dns.cname | join(", ") or "none" }}`
+{% if prof.dns.get("security_checked") -%}
+- **DNS Hygiene:** CAA=`{{ prof.dns.get("caa", []) | join("; ") or "none" }}`, SPF=`{{ prof.dns.get("spf") or "none" }}`, DMARC=`{{ prof.dns.get("dmarc") or "none" }}`, DNSSEC={{ "Yes" if prof.dns.get("dnssec_present") else "No" }}
+{% endif -%}
+{% if prof.dns.errors -%}
+- **DNS Errors:** `{{ prof.dns.errors | join("; ") }}`
+{% endif -%}
+{% endif -%}
+{% if prof.tls and prof.tls.applicable -%}
+- **TLS:** {{ prof.tls.negotiated_version }} (`{{ prof.tls.cipher_suite }}`), Verified={{ prof.tls.verified }}, Issuer=`{{ prof.tls.issuer or "—" }}`, Expires=`{{ prof.tls.not_after or "—" }}` ({{ prof.tls.days_remaining }} days)
+{% if prof.tls.get("key_type") -%}
+- **TLS Certificate Key/Sig:** `{{ prof.tls.key_type }} {{ prof.tls.get("key_size") or "" }}`, Sig=`{{ prof.tls.get("signature_algorithm") or "—" }}`, SCT={{ "Yes" if prof.tls.get("has_sct") else "No" }}
+{% endif -%}
+{% if prof.tls.supported_versions -%}
+- **Supported TLS Versions:** `{{ prof.tls.supported_versions | join(", ") }}`
+{% endif -%}
+{% if prof.tls.get("cipher_weaknesses") -%}
+- **Cipher Weaknesses:** `{{ prof.tls.cipher_weaknesses | join("; ") }}`
+{% endif -%}
+{% if prof.tls.sans -%}
+- **TLS SANs:** `{{ prof.tls.sans | join(", ") }}`
+{% endif -%}
+{% if prof.tls.verification_error -%}
+- **TLS Verification Error:** `{{ prof.tls.verification_error }}`
+{% endif -%}
+{% endif %}
+
+| Security Header | Status | Value | Notes |
+|---|---|---|---|
+{% for h in prof.headers.security_headers -%}
+| `{{ h.header }}` | {{ h.status }} | `{{ h.value | md_cell }}` | {{ h.note | md_cell }} |
+{% endfor %}
+{% if prof.headers.banner_disclosures %}
+
+**Banner Disclosures:**
+{% for b in prof.headers.banner_disclosures -%}
+- `{{ b.header }}: {{ b.value }}`
+{% endfor %}
+{% endif %}
+{% if prof.headers.cookies %}
+
+| Cookie | Secure | HttpOnly | SameSite |
+|---|---|---|---|
+{% for c in prof.headers.cookies -%}
+| `{{ c.name | md_cell }}` | {{ "yes" if c.secure else "no" }} | {{ "yes" if c.http_only else "no" }} | {{ c.same_site | md_cell }} |
+{% endfor %}
+{% endif %}
+{% endfor %}
+{% endif %}
+
+{% if bundle.fingerprints %}
+## Passive Fingerprints
+{% for fp in bundle.fingerprints %}
+### {{ fp.target }} (mode: `{{ fp.mode }}`)
+{% if fp.matches %}
+| Product | Version | Vendor | Category | Confidence | CPE | Evidence |
+|---|---|---|---|---|---|---|
+{% for m in fp.matches -%}
+| {{ m.product | md_cell }} | `{{ m.get("version") | md_cell }}` | {{ m.vendor | md_cell }} | {{ m.category }} | {{ m.confidence }} | `{{ m.get("cpe") | md_cell }}` | `{{ m.evidence | join("; ") | md_cell }}` |
+{% endfor %}
+{% else %}
+_No passive technology signatures matched._
+{% endif %}
+{% endfor %}
+{% endif %}
+
+{% if bundle.cves %}
+## CVE Triage Findings
+{% for cve_bundle in bundle.cves %}
+| CVE ID | CVSS | Severity | KEV | EPSS | Published | Description |
+|---|---|---|---|---|---|---|
+{% for rec in cve_bundle.records -%}
+| `{{ rec.cve_id }}` | {{ rec.cvss.base_score if rec.cvss else "—" }} | {{ rec.cvss.severity if rec.cvss else "—" }} | {{ "YES" if rec.get("in_kev") else "—" }} | {{ ("%.1f%%" | format(rec.epss_score * 100)) if rec.get("epss_score") is not none else "—" }} | {{ rec.published[:10] }} | {{ rec.description | md_cell }} |
+{% endfor %}
+{% endfor %}
+{% endif %}
