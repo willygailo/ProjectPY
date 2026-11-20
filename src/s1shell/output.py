@@ -344,6 +344,266 @@ def render_scope_check(
         console.print(text)
 
 
+def _append_profile_entity_markdown(
+    result: ProfileResult,
+    lines: list[str],
+    *,
+    intel: IntelLookupResult | None = None,
+) -> None:
+    """Append Markdown sections for extracted identity, emails, phones, keys/IDs & endpoints."""
+    html = result.html
+    wk = result.well_known
+    tls = result.tls
+    rdap = intel.rdap if intel is not None else None
+
+    all_emails: list[str] = []
+    if html and html.emails:
+        for em in html.emails:
+            if em not in all_emails:
+                all_emails.append(em)
+    if wk and wk.security_txt_contacts:
+        for sc in wk.security_txt_contacts:
+            val = sc[7:] if sc.lower().startswith("mailto:") else sc
+            if val and val not in all_emails:
+                all_emails.append(val)
+    if rdap:
+        for em in rdap.emails:
+            tag = f"{em} (RDAP)"
+            if em not in all_emails and tag not in all_emails:
+                all_emails.append(tag)
+
+    all_phones: list[str] = []
+    if html and html.phone_numbers:
+        for ph in html.phone_numbers:
+            if ph not in all_phones:
+                all_phones.append(ph)
+    if rdap:
+        for ph in rdap.phone_numbers:
+            tag = f"{ph} (RDAP)"
+            if ph not in all_phones and tag not in all_phones:
+                all_phones.append(tag)
+
+    identities: list[str] = []
+    if html and html.title:
+        identities.append(f"Title: {html.title}")
+    if html and html.meta_generator:
+        identities.append(f"Generator: {html.meta_generator}")
+    if html and html.identities_and_names:
+        for item in html.identities_and_names:
+            identities.append(f"{item.get('kind', 'meta')}: {item.get('value', '')}")
+    if tls and tls.applicable and tls.subject:
+        identities.append(f"TLS Subject: {tls.subject}")
+    if tls and tls.applicable and tls.serial_number:
+        identities.append(f"TLS Serial ID: {tls.serial_number}")
+    if rdap:
+        if rdap.handle or rdap.name:
+            identities.append(f"RDAP Handle/Name: {rdap.handle or '—'} / {rdap.name or '—'}")
+        if rdap.organization or rdap.registrar:
+            identities.append(
+                f"RDAP Org/Registrar: {rdap.organization or '—'} / {rdap.registrar or '—'}"
+            )
+        for ent in rdap.entities[:6]:
+            identities.append(f"RDAP Entity: {ent}")
+    if intel and intel.virustotal and intel.virustotal.as_owner:
+        identities.append(f"AS Owner: {intel.virustotal.as_owner}")
+
+    lines.extend(
+        ["", "## Target Identity, Contacts (Email / Gmail / Phone) & Surface Metadata", ""]
+    )
+    lines.append(f"- **Target URL / Host:** `{result.url}` (Pinned IP: `{result.pinned_ip}`)")
+    lines.append(
+        f"- **Identities & Names:** "
+        f"{'; '.join(f'`{_md_cell(i)}`' for i in identities) if identities else 'none detected'}"
+    )
+    lines.append(
+        f"- **Emails & Gmail Contacts:** "
+        f"{', '.join(f'`{_md_cell(e)}`' for e in all_emails) if all_emails else 'none detected'}"
+    )
+    lines.append(
+        f"- **Phone / Contact Numbers:** "
+        f"{', '.join(f'`{_md_cell(p)}`' for p in all_phones) if all_phones else 'none detected'}"
+    )
+    if html and html.social_links:
+        lines.append(
+            f"- **Social & External Profiles:** "
+            f"{', '.join(f'`{_md_cell(s)}`' for s in html.social_links[:12])}"
+        )
+    if html and html.cloud_and_api_endpoints:
+        lines.append(
+            f"- **Cloud Buckets & API Endpoints:** "
+            f"{', '.join(f'`{_md_cell(ep)}`' for ep in html.cloud_and_api_endpoints[:15])}"
+        )
+    if tls and tls.applicable and tls.sans:
+        lines.append(f"- **TLS Certificate SANs:** `{', '.join(tls.sans[:15])}`")
+
+    keys_and_ids = list(html.exposed_ids_and_keys) if (html and html.exposed_ids_and_keys) else []
+    jwts = list(html.passive_jwts) if (html and html.passive_jwts) else []
+    if keys_and_ids or jwts:
+        lines.extend(
+            [
+                "",
+                "## Exposed Keys, App / Client IDs & Passive Tokens",
+                "",
+                "| Type | Key / ID / Token Summary | Location |",
+                "|---|---|---|",
+            ]
+        )
+        for k in keys_and_ids:
+            lines.append(
+                f"| `{_md_cell(k.get('type', 'id'))}` | `{_md_cell(k.get('value', '—'))}` | "
+                f"`{_md_cell(k.get('location', 'html'))}` |"
+            )
+        for j in jwts:
+            claims = ", ".join(j.get("claim_keys", [])) or "none"
+            lines.append(
+                f"| `jwt ({j.get('alg', '?')})` | `claims=[{claims}] exp={j.get('has_exp')}` | "
+                f"`{_md_cell(str(j.get('location', 'html')))}` |"
+            )
+
+
+def _build_profile_entity_tables(
+    result: ProfileResult,
+    *,
+    intel: IntelLookupResult | None = None,
+) -> list[Table]:
+    """Build Rich tables displaying Target Identity, Emails/Gmail, Phones, Keys/IDs & Endpoints."""
+    html = result.html
+    wk = result.well_known
+    tls = result.tls
+    rdap = intel.rdap if intel is not None else None
+    out: list[Table] = []
+
+    all_emails: list[str] = []
+    if html and html.emails:
+        for em in html.emails:
+            if em not in all_emails:
+                all_emails.append(em)
+    if wk and wk.security_txt_contacts:
+        for sc in wk.security_txt_contacts:
+            val = sc[7:] if sc.lower().startswith("mailto:") else sc
+            if val and val not in all_emails:
+                all_emails.append(f"{val} (security.txt)")
+    if rdap:
+        for em in rdap.emails:
+            tag = f"{em} (RDAP)"
+            if em not in all_emails and tag not in all_emails:
+                all_emails.append(tag)
+
+    all_phones: list[str] = []
+    if html and html.phone_numbers:
+        for ph in html.phone_numbers:
+            if ph not in all_phones:
+                all_phones.append(ph)
+    if rdap:
+        for ph in rdap.phone_numbers:
+            tag = f"{ph} (RDAP)"
+            if ph not in all_phones and tag not in all_phones:
+                all_phones.append(tag)
+
+    names_list: list[str] = []
+    if html and html.title:
+        names_list.append(f"Title: {html.title}")
+    if html and html.meta_generator:
+        names_list.append(f"Generator: {html.meta_generator}")
+    if html and html.identities_and_names:
+        for item in html.identities_and_names:
+            names_list.append(f"{item.get('kind', 'meta')}: {item.get('value', '')}")
+    if rdap:
+        if rdap.organization or rdap.registrar:
+            names_list.append(
+                f"RDAP Org/Registrar: {rdap.organization or '—'} / {rdap.registrar or '—'}"
+            )
+        if rdap.handle or rdap.name:
+            names_list.append(f"RDAP Handle/Name: {rdap.handle or '—'} / {rdap.name or '—'}")
+        for ent in rdap.entities[:6]:
+            names_list.append(f"RDAP Entity: {ent}")
+    if intel and intel.virustotal and intel.virustotal.as_owner:
+        names_list.append(f"AS Owner: {intel.virustotal.as_owner}")
+
+    entity_tbl = Table(
+        title=f"Target Identity, Contacts (Email / Gmail / Phone) & Surface Entities: {result.url}"
+    )
+    entity_tbl.add_column("Category", style="cyan", no_wrap=True)
+    entity_tbl.add_column("Extracted Values / Details", overflow="fold")
+    entity_tbl.add_row("Target URL / Host / IP", f"{result.url} | Pinned IP: {result.pinned_ip}")
+    if tls and tls.applicable:
+        cert_parts: list[str] = []
+        if tls.subject:
+            cert_parts.append(f"Subject={tls.subject}")
+        if tls.issuer:
+            cert_parts.append(f"Issuer={tls.issuer}")
+        if tls.serial_number:
+            cert_parts.append(f"Serial={tls.serial_number}")
+        if tls.spki_sha256:
+            cert_parts.append(f"SPKI={tls.spki_sha256}")
+        if cert_parts:
+            entity_tbl.add_row("TLS Cert Identity & ID", " | ".join(cert_parts))
+        if tls.sans:
+            extra_sans = f" (+{len(tls.sans) - 15} more)" if len(tls.sans) > 15 else ""
+            entity_tbl.add_row(
+                "Certificate SANs / Domains",
+                ", ".join(tls.sans[:15]) + extra_sans,
+            )
+    entity_tbl.add_row(
+        "Names / Org / Identity",
+        "\n".join(names_list) if names_list else "none detected in HTML/RDAP",
+    )
+    entity_tbl.add_row(
+        "Emails & Gmail Contacts",
+        ", ".join(all_emails) if all_emails else "none detected",
+    )
+    entity_tbl.add_row(
+        "Phone / Contact Numbers",
+        ", ".join(all_phones) if all_phones else "none detected",
+    )
+    keys_and_ids = list(html.exposed_ids_and_keys) if (html and html.exposed_ids_and_keys) else []
+    jwts = list(html.passive_jwts) if (html and html.passive_jwts) else []
+    if keys_and_ids or jwts:
+        key_summaries = [
+            f"{k.get('type', 'id')}={k.get('value', '—')} ({k.get('location', 'html')})"
+            for k in keys_and_ids[:15]
+        ]
+        for j in jwts[:5]:
+            claims = ",".join(j.get("claim_keys", []))
+            key_summaries.append(
+                f"jwt[{j.get('alg', '?')}]: claims=({claims}) ({j.get('location', 'html')})"
+            )
+        entity_tbl.add_row("Keys / Client & App IDs", "\n".join(key_summaries))
+    else:
+        entity_tbl.add_row("Keys / Client & App IDs", "none detected")
+
+    if html and html.social_links:
+        entity_tbl.add_row("Social & Profile Links", "\n".join(html.social_links[:10]))
+    if html and html.cloud_and_api_endpoints:
+        entity_tbl.add_row(
+            "Cloud Buckets & API Paths",
+            ", ".join(html.cloud_and_api_endpoints[:15]),
+        )
+    if html and html.third_party_origins:
+        entity_tbl.add_row(
+            "Third-Party Origins",
+            ", ".join(html.third_party_origins[:12]),
+        )
+    if wk and (
+        wk.security_txt_present or wk.robots_txt_present or wk.oidc_issuer or wk.jwks_key_count
+    ):
+        wk_parts: list[str] = []
+        if wk.security_txt_present:
+            wk_parts.append(
+                f"security.txt=present (contacts={', '.join(wk.security_txt_contacts) or 'none'})"
+            )
+        if wk.robots_txt_present:
+            hints_txt = ", ".join(wk.robots_sensitive_hints[:6]) or "none"
+            wk_parts.append(f"robots.txt=present (sensitive_paths={hints_txt})")
+        if wk.oidc_issuer:
+            wk_parts.append(f"OIDC issuer={wk.oidc_issuer}")
+        if wk.jwks_key_count:
+            wk_parts.append(f"JWKS keys={wk.jwks_key_count}")
+        entity_tbl.add_row("Well-Known Surface", " | ".join(wk_parts))
+    out.append(entity_tbl)
+    return out
+
+
 def render_profile_result(
     result: ProfileResult,
     *,
@@ -414,6 +674,7 @@ def render_profile_result(
                     f"| `{_md_cell(c.name)}` | {c.secure} | {c.http_only} | "
                     f"{_md_cell(c.same_site)} |"
                 )
+        _append_profile_entity_markdown(result, lines)
         write_or_print("\n".join(lines), out_file=out_file, stdout=stdout)
         return
 
@@ -456,11 +717,16 @@ def render_profile_result(
         summary.add_row("TLS", f"{tls_ver} ({tls_cipher}) [{tls_state}, {days}]")
         if result.tls.issuer:
             summary.add_row("TLS Issuer", result.tls.issuer)
+        if result.tls.subject:
+            summary.add_row("TLS Subject", result.tls.subject)
+        if result.tls.serial_number:
+            summary.add_row("TLS Serial ID", result.tls.serial_number)
         if result.tls.supported_versions:
             summary.add_row("TLS Versions", ", ".join(result.tls.supported_versions))
         if result.tls.spki_sha256:
             summary.add_row("TLS SPKI Pin", result.tls.spki_sha256)
     tables.append(summary)
+    tables.extend(_build_profile_entity_tables(result))
 
     headers_tbl = Table(title="Security Headers")
     headers_tbl.add_column("Security Header")
@@ -1021,6 +1287,7 @@ def render_assessment_result(
                 f"{_md_cell(finding.title)} | {_md_cell(finding.evidence)} | "
                 f"{_md_cell(finding.remediation)} |"
             )
+        _append_profile_entity_markdown(result.profile, lines, intel=result.intel)
         if result.ai_analysis is not None:
             lines.extend(["", "## AI Defensive Triage", "", result.ai_analysis.analysis])
         if result.saved_files:
@@ -1050,6 +1317,7 @@ def render_assessment_result(
     if result.saved_files:
         summary.add_row("Saved Bundle", ", ".join(result.saved_files))
     tables.append(summary)
+    tables.extend(_build_profile_entity_tables(result.profile, intel=result.intel))
 
     findings_tbl = Table(title="Prioritized Pentester Findings & Remediation")
     findings_tbl.add_column("ID", style="cyan", no_wrap=True)
@@ -1581,6 +1849,9 @@ def render_rdap_lookup(
                 f"({result.start_address or '—'} - {result.end_address or '—'})"
             ),
             f"- **Abuse Contact:** `{result.abuse_contact or '—'}`",
+            f"- **Emails:** `{', '.join(result.emails) or 'none'}`",
+            f"- **Phone Numbers:** `{', '.join(result.phone_numbers) or 'none'}`",
+            f"- **Entities:** `{'; '.join(result.entities) or 'none'}`",
         ]
         write_or_print("\n".join(lines), out_file=out_file, stdout=stdout)
         return
@@ -1609,6 +1880,12 @@ def render_rdap_lookup(
             f"{result.cidr or '—'} ({result.start_address or '—'} - {result.end_address or '—'})",
         )
     tbl.add_row("Abuse Contact", result.abuse_contact or "—")
+    if result.emails:
+        tbl.add_row("RDAP Emails", ", ".join(result.emails))
+    if result.phone_numbers:
+        tbl.add_row("RDAP Phones", ", ".join(result.phone_numbers))
+    if result.entities:
+        tbl.add_row("RDAP Entities", "\n".join(result.entities[:8]))
     tbl.add_row("Cached", str(result.cached))
     _emit_tables([tbl], console=console, out_file=out_file, stdout=stdout)
 

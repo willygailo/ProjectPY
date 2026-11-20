@@ -30,6 +30,10 @@ All notable changes to S1shell will be documented in this file.
 - **Leading-Dot / Wildcard TLD Scope Rules & Project `scope.yaml` Auto-Discovery (`scope.py`, `config.py`, `scope.yaml.example`)**:
   - Added leading-dot TLD & domain syntax (`.com`, `.ph`, `.com.ph`, `.gov.ph`, `.edu.ph`, `.org`, `.net`, `.io`, etc.) alongside `*.domain` in `s1shell scope add|import`, automatically normalizing to `include_subdomains: true`.
   - Added automatic project `./scope.yaml` fallback discovery when `~/.s1shell/scope.yaml` is not present yet, plus a tracked `scope.yaml.example` template with 35 pre-configured Philippine (`.ph`, `.com.ph`, `.gov.ph`, `.edu.ph`, `.org.ph`, `.net.ph`), global, and regional TLD entries.
+- **Passive Target Identity, Contacts (Email / Gmail / Phone), Keys / Client-IDs & Surface Entity Output (`profile/html_check.py`, `intel/clients.py`, `output.py`, `report.html.j2`)**:
+  - Added zero-extra-packet extraction of target **Emails & `[Gmail]` contacts**, **Phone/Contact numbers** (`tel:`, `JSON-LD`, international/PH numbers), **Exposed Keys & Client/App IDs** (GA4/UA, GTM, Google Ads/AdSense, Firebase `apiKey`/`projectId`/`appId`, Meta Pixel/App ID, Stripe publishable/live keys, reCAPTCHA/Turnstile `sitekey`, OAuth `client_id`, Sentry DSN, Mapbox tokens, AWS/GCP/GitHub/Slack/Telegram/OpenAI tokens, and passive JWT claims), **Names/Organizations** (`meta` + Schema.org `JSON-LD`), **Social links**, and **Cloud storage buckets / API paths**.
+  - Enhanced RDAP parsing (`parse_rdap_payload`) to extract public vCard contact emails, phone numbers (`tel`), and entity names/handles/roles.
+  - Added a dedicated **`Target Identity, Contacts (Email / Gmail / Phone) & Surface Entities`** table to `s1shell profile` and `s1shell assess` (`table`, `md`, `json`, and `html` reports).
 
 ### Fixed
 - **HTTPS IP-Literal TLS Handshake (`profile/tls_check.py`)**: Fixed `ValueError: check_hostname requires server_hostname` when profiling HTTPS IP targets (e.g. `https://1.1.1.1` or `https://127.0.0.1`) by passing the IP literal as `server_hostname` during verified TLS handshakes so Python's `ssl` validates IP SANs cleanly.

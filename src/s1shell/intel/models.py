@@ -139,6 +139,9 @@ class RDAPLookupResult:
     start_address: str | None = None
     end_address: str | None = None
     abuse_contact: str | None = None
+    emails: list[str] = field(default_factory=list)
+    phone_numbers: list[str] = field(default_factory=list)
+    entities: list[str] = field(default_factory=list)
     source_url: str | None = None
     schema_version: str = SCHEMA_VERSION
     tool_version: str = __version__

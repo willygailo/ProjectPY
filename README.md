@@ -64,8 +64,8 @@ flowchart LR
       Allow/deny (<code>--exclude</code>) rules for domains, IPs, CIDRs, URL prefixes, and <b>Tor v3 <code>.onion</code></b>, bulk import (<code>--dry-run</code>), DNS rebinding + private/CGNAT (<code>100.64.0.0/10</code>)/NAT64 (<code>64:ff9b::/96</code>)/IPv4-mapped IPv6/metadata guards, IP-pinned HTTP/TLS, atomic <code>0600</code> writes, and a file-locked (<code>fcntl.flock</code>) <code>O(1)</code> SHA-256 hash-chained <code>audit.log</code>.
     </td>
     <td width="50%" valign="top">
-      <h3>🔍 Deep Read-Only Target Profiling</h3>
-      Recursive RFC 7208 <code>SPF</code> + void/loop checks, <code>DMARC</code>/<code>MTA-STS</code>/<code>TLS-RPT</code>/<code>BIMI</code>/<code>DANE TLSA</code>/<code>DNSSEC</code>/dangling CNAME, full X.509 cert chains + CAA alignment + TLS 1.0–1.3 matrix + SPKI pin, CSP v2/CORS/HSTS/cookies, passive HTML secret/JWT/source-map/stack-trace checks, plus opt-in <code>OPTIONS</code> &amp; OIDC/JWKS well-known audits.
+      <h3>🔍 Deep Read-Only Target Profiling &amp; Entity Extraction</h3>
+      Recursive RFC 7208 <code>SPF</code> + void/loop checks, <code>DMARC</code>/<code>MTA-STS</code>/<code>TLS-RPT</code>/<code>BIMI</code>/<code>DANE TLSA</code>/<code>DNSSEC</code>/dangling CNAME, full X.509 cert chains + Subject/Serial/SPKI pin, CSP v2/CORS/HSTS/cookies, plus zero-extra-packet extraction of <b>Names/Organizations (<code>meta</code> + <code>JSON-LD</code>), Emails &amp; <code>[Gmail]</code> contacts, Phone numbers (<code>+63</code>/PH/intl), Exposed Keys &amp; Client/App IDs (GA4, GTM, Firebase, Stripe, OAuth, reCAPTCHA, GCP/AWS/GitHub/OpenAI/Telegram, JWTs), Social links, Cloud buckets, and API paths</b>.
     </td>
   </tr>
   <tr>
@@ -81,7 +81,7 @@ flowchart LR
   <tr>
     <td width="50%" valign="top">
       <h3>🌐 7-Feed Passive Threat Intel &amp; OSINT</h3>
-      Cached, zero-target-contact lookups with bounded HTTP <code>429</code>/<code>502</code>/<code>503</code>/<code>504</code> <code>Retry-After</code> backoff across <b>VirusTotal v3</b>, <b>GreyNoise Community</b>, <b>urlscan.io Search</b>, <b>GHSA</b>, <b>NVD</b>, plus zero-API-key <b>Certificate Transparency (<code>crt.sh</code>)</b> and <b>RDAP</b>.
+      Cached, zero-target-contact lookups with bounded HTTP <code>429</code>/<code>502</code>/<code>503</code>/<code>504</code> <code>Retry-After</code> backoff across <b>VirusTotal v3</b>, <b>GreyNoise Community</b>, <b>urlscan.io Search</b>, <b>GHSA</b>, <b>NVD</b>, plus zero-API-key <b>Certificate Transparency (<code>crt.sh</code>)</b> and <b>RDAP</b> (including vCard registrant/abuse emails, phone numbers, and entity roles/handles).
     </td>
     <td width="50%" valign="top">
       <h3>🔧 Playbooks, Presets, Drift Diffs &amp; SARIF</h3>
@@ -461,7 +461,7 @@ s1shell remediate ./results/target-com/assess.json --stack auto --out ./results/
 ```
 
 <details>
-<summary><b>📺 Example Terminal Output Preview</b></summary>
+<summary><b>📺 Example Terminal Output Preview (Posture + Target Identity, Contacts, Emails/Gmail, Phones &amp; Keys/IDs)</b></summary>
 
 ```text
 [IN SCOPE] target=https://www.target.com resolved_ips=[93.184.216.34] — Authorized by scope entry '7c715dbe' (SOW-2026-014).
@@ -477,6 +477,37 @@ Assessment Posture Summary: https://www.target.com/ (93.184.216.34)
 │ Correlated CVEs │ 2 (KEV=0, P1-URGENT=1)                                     │
 │ Saved Bundle    │ report.html, report.md, report.sarif, assess.json, ...     │
 └─────────────────┴────────────────────────────────────────────────────────────┘
+
+Target Identity, Contacts (Email / Gmail / Phone) & Surface Entities: https://www.target.com/
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ Category                   ┃ Extracted Values / Details                      ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ Target URL / Host / IP     │ https://www.target.com/ | Pinned IP: 93.184.216.34 │
+│ TLS Cert Identity & ID     │ Subject=CN=www.target.com,O=Target Corp |       │
+│                            │ Issuer=CN=DigiCert TLS RSA SHA256 |             │
+│                            │ Serial=04a1b2c3d4e5f601 | SPKI=base64pin...     │
+│ Certificate SANs / Domains │ www.target.com, api.target.com, auth.target.com │
+│ Names / Org / Identity     │ Title: Target Online Portal                     │
+│                            │ Generator: WordPress 6.5.2                      │
+│                            │ meta:author: Juan Dela Cruz                     │
+│                            │ jsonld:Organization.name: Target Corp           │
+│                            │ jsonld:Organization.taxID: TIN-123-456-789-000  │
+│ Emails & Gmail Contacts    │ admin.target@gmail.com [Gmail],                 │
+│                            │ security@target.com (security.txt),             │
+│                            │ abuse@registrar.example (RDAP)                  │
+│ Phone / Contact Numbers    │ +63288881234, +63 917 555 0199, 0918-234-5678   │
+│ Keys / Client & App IDs    │ gcp_api_key=AIza****stuv (html)                 │
+│                            │ google_analytics_id=G-987654321A (html)         │
+│                            │ google_tag_manager_id=GTM-ABC1234 (html)        │
+│                            │ firebase_project_id=target-prod-01 (html)       │
+│                            │ firebase_app_id=1:123456789012:web:abcdef...    │
+│                            │ stripe_publishable_key=pk_live_51H12345678...   │
+│                            │ oauth_client_id=target-web-client-prod (html)   │
+│ Social & Profile Links     │ https://github.com/target-org                   │
+│                            │ https://www.linkedin.com/company/target-org     │
+│ Cloud Buckets & API Paths  │ cloud:https://target-assets.s3.amazonaws.com,   │
+│                            │ /api/v2/users/profile                           │
+└────────────────────────────┴─────────────────────────────────────────────────┘
 ```
 
 </details>
@@ -805,9 +836,9 @@ s1shell audit verify
 | `s1shell assess <target \| --targets-file>` | Scoped target + NVD/KEV/EPSS (+ optional VT/GN/urlscan/RDAP with `--intel`) | Unified profile, fingerprint, EOL, CVE, intel, posture, playbook, & report bundle |
 | `s1shell scope add \| import \| list \| check \| remove \| expire` | DNS on `check` only (DoH-over-Tor with `--tor --tor-targets`; zero DNS on `.onion`) | Manage authorized allow/exclude rules (domain, IP, CIDR, URL prefix, v3 `.onion`) & bulk imports |
 | `s1shell cve search \| get \| audit \| cache clear` | Public NVD / CVE.org / OSV.dev / GHSA / KEV / EPSS | CVE lookup, SSVC priority triage, & recursive lockfile/SBOM auditing |
-| `s1shell intel env \| lookup \| advisory \| ct \| rdap` | Public VT / GreyNoise / urlscan Search / GHSA / crt.sh / RDAP | Zero-target-contact passive threat intel, CT logs, RDAP, & `.env` key manager |
+| `s1shell intel env \| lookup \| advisory \| ct \| rdap` | Public VT / GreyNoise / urlscan Search / GHSA / crt.sh / RDAP | Zero-target-contact passive threat intel, CT logs, RDAP (org, emails, phones, entities), & `.env` key manager |
 | `s1shell codec decode \| encode \| inspect \| hash` | None (offline) | Offline Base64/Hex/URL/SAML/JWT/X.509/Gzip/Auto decoder, encoder, inspector, & hashes |
-| `s1shell profile <target>` | Single target (1 GET + TLS + opt-in checks) | Recursive SPF/DNS, TLS chain/SPKI/CAA, CSP v2, passive leaks/JWT, OIDC/JWKS, `OPTIONS` |
+| `s1shell profile <target>` | Single target (1 GET + TLS + opt-in checks) | Recursive SPF/DNS, TLS chain/Subject/Serial/SPKI, CSP v2, passive emails/Gmail, phones, keys/IDs, names/JSON-LD, social links, cloud buckets, API paths, OIDC/JWKS, `OPTIONS` |
 | `s1shell fingerprint [<target> \| --from-profile FILE]` | None (`--from-profile`) or 1 GET | Passive server/CDN/WAF/JS-library identification with CPE 2.3 & offline EOL flags |
 | `s1shell remediate <assess.json>` | None (offline) | Deterministic stack-tailored hardening config generator |
 | `s1shell diff <base.json> <curr.json>` | None (offline) | Security posture drift detection & CI regression gate |

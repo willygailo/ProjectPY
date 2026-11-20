@@ -78,6 +78,8 @@ Each line is one canonical JSON object chained via SHA-256 (`prev_hash` -> `entr
 
 Each entry in `findings[]` contains `id`, `severity`, `category`, `title`, `evidence`, `remediation`, and structured compliance mappings (`cwe`, `asvs`, `owasp`, `nist`), which are also emitted as SARIF 2.1.0 rule tags under `--format sarif`.
 
+In addition, `profile.html` (`HTMLPassiveAnalysis`) includes additive passive surface entity fields (`emails`, `phone_numbers`, `exposed_ids_and_keys`, `identities_and_names`, `social_links`, `cloud_and_api_endpoints`), and `intel.rdap` (`RDAPLookupResult`) includes additive vCard contact fields (`emails`, `phone_numbers`, `entities`).
+
 ## 4. Inter-Module Pipeline (`v0.5.0`)
 
 - `s1shell scope add .com --owner "Operator" --ref "SOW-2026" --expires 2029-12-31`

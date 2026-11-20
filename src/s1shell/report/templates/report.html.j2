@@ -343,7 +343,7 @@
       {% endif %}
 
       {% if prof.get("html") and prof.html.get("analyzed") %}
-      <h4>Passive HTML Telemetry</h4>
+      <h4>Passive HTML Telemetry &amp; Extracted Surface Entities</h4>
       <p>
         Title: <code>{{ prof.html.get("title") or "—" }}</code> |
         Generator: <code>{{ prof.html.get("meta_generator") or "—" }}</code> |
@@ -351,6 +351,30 @@
         Mixed Content: <strong>{{ prof.html.get("mixed_content_urls", []) | length }}</strong>
         {% if prof.html.get("detected_libraries") %}
         <br>Client Libraries: <code>{{ prof.html.detected_libraries | join(", ") }}</code>
+        {% endif %}
+        {% if prof.html.get("identities_and_names") %}
+        <br><strong>Names &amp; Identities:</strong>
+        {% for item in prof.html.identities_and_names %}
+          <code>{{ item.kind }}={{ item.value }}</code>{% if not loop.last %}, {% endif %}
+        {% endfor %}
+        {% endif %}
+        {% if prof.html.get("emails") %}
+        <br><strong>Emails &amp; Gmail Contacts:</strong> <code>{{ prof.html.emails | join(", ") }}</code>
+        {% endif %}
+        {% if prof.html.get("phone_numbers") %}
+        <br><strong>Phone / Contact Numbers:</strong> <code>{{ prof.html.phone_numbers | join(", ") }}</code>
+        {% endif %}
+        {% if prof.html.get("exposed_ids_and_keys") %}
+        <br><strong>Exposed Keys &amp; App/Client IDs:</strong>
+        {% for k in prof.html.exposed_ids_and_keys %}
+          <code>{{ k.type }}={{ k.value }}</code>{% if not loop.last %}, {% endif %}
+        {% endfor %}
+        {% endif %}
+        {% if prof.html.get("social_links") %}
+        <br><strong>Social &amp; External Profiles:</strong> <code>{{ prof.html.social_links | join(", ") }}</code>
+        {% endif %}
+        {% if prof.html.get("cloud_and_api_endpoints") %}
+        <br><strong>Cloud Buckets &amp; API Endpoints:</strong> <code>{{ prof.html.cloud_and_api_endpoints | join(", ") }}</code>
         {% endif %}
       </p>
       {% endif %}

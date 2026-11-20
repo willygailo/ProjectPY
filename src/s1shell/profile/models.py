@@ -171,6 +171,12 @@ class HTMLPassiveAnalysis:
     unsafe_blank_links: int = 0
     leaked_secrets: list[dict[str, str]] = field(default_factory=list)
     passive_jwts: list[dict[str, Any]] = field(default_factory=list)
+    emails: list[str] = field(default_factory=list)
+    phone_numbers: list[str] = field(default_factory=list)
+    exposed_ids_and_keys: list[dict[str, str]] = field(default_factory=list)
+    identities_and_names: list[dict[str, str]] = field(default_factory=list)
+    social_links: list[str] = field(default_factory=list)
+    cloud_and_api_endpoints: list[str] = field(default_factory=list)
     source_maps: list[str] = field(default_factory=list)
     stack_traces: list[str] = field(default_factory=list)
 

@@ -445,15 +445,27 @@ def _parse_iso_dt(raw: str | None) -> datetime | None:
 
 
 def _extract_rdap_vcard_field(entity: dict[str, Any], field_name: str) -> str | None:
+    vals = _extract_rdap_vcard_fields(entity, field_name)
+    return vals[0] if vals else None
+
+
+def _extract_rdap_vcard_fields(entity: dict[str, Any], field_name: str) -> list[str]:
     vcard = entity.get("vcardArray")
     if not isinstance(vcard, list) or len(vcard) < 2 or not isinstance(vcard[1], list):
-        return None
+        return []
+    out: list[str] = []
     for row in vcard[1]:
         if isinstance(row, list) and len(row) >= 4 and str(row[0]).lower() == field_name:
             val = row[3]
             if isinstance(val, str) and val.strip():
-                return val.strip()
-    return None
+                cleaned = val.strip()
+                if cleaned.lower().startswith("tel:"):
+                    cleaned = cleaned[4:].strip()
+                elif cleaned.lower().startswith("mailto:"):
+                    cleaned = cleaned[7:].strip()
+                if cleaned and cleaned not in out:
+                    out.append(cleaned)
+    return out
 
 
 def parse_crtsh_payload(
@@ -609,6 +621,9 @@ def parse_rdap_payload(
     registrar: str | None = None
     organization: str | None = None
     abuse_contact: str | None = None
+    emails: list[str] = []
+    phone_numbers: list[str] = []
+    entity_summaries: list[str] = []
 
     def _walk_entities(entities: Any) -> None:
         nonlocal registrar, organization, abuse_contact
@@ -618,8 +633,31 @@ def parse_rdap_payload(
             if not isinstance(ent, dict):
                 continue
             roles = {str(r).strip().lower() for r in ent.get("roles", []) if str(r).strip()}
+            ent_handle = str(ent.get("handle") or "").strip()
             fn = _extract_rdap_vcard_field(ent, "fn")
-            email = _extract_rdap_vcard_field(ent, "email")
+            ent_emails = _extract_rdap_vcard_fields(ent, "email")
+            ent_tels = _extract_rdap_vcard_fields(ent, "tel")
+            email = ent_emails[0] if ent_emails else None
+            for em in ent_emails:
+                if em not in emails:
+                    emails.append(em)
+            for tel in ent_tels:
+                if tel not in phone_numbers:
+                    phone_numbers.append(tel)
+            label_name = fn or ent_handle
+            if label_name:
+                role_tag = "/".join(sorted(roles)) if roles else "entity"
+                summary_item = (
+                    f"{label_name} ({role_tag})"
+                    if fn and not ent_handle
+                    else (
+                        f"{fn} [{ent_handle}] ({role_tag})"
+                        if fn and ent_handle and fn != ent_handle
+                        else f"{label_name} ({role_tag})"
+                    )
+                )
+                if summary_item not in entity_summaries:
+                    entity_summaries.append(summary_item)
             if "registrar" in roles and registrar is None and fn:
                 registrar = fn
             if ("registrant" in roles or "administrative" in roles) and organization is None and fn:
@@ -629,6 +667,8 @@ def parse_rdap_payload(
             _walk_entities(ent.get("entities"))
 
     _walk_entities(payload.get("entities"))
+    if abuse_contact and abuse_contact not in emails:
+        emails.insert(0, abuse_contact)
 
     cidr: str | None = None
     cidr_list = payload.get("cidr0_cidrs")
@@ -664,6 +704,9 @@ def parse_rdap_payload(
         start_address=start_addr,
         end_address=end_addr,
         abuse_contact=abuse_contact,
+        emails=emails[:20],
+        phone_numbers=phone_numbers[:20],
+        entities=entity_summaries[:20],
         source_url=source_url,
     )
 
