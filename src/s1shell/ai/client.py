@@ -13,6 +13,7 @@ from s1shell.ai.guardrails import validate_local_endpoint
 from s1shell.config import RuntimeConfig, classify_anthropic_key
 from s1shell.errors import NetworkError, ValidationError
 from s1shell.http import build_intel_client
+from s1shell.tor import is_loopback_host
 
 ANTHROPIC_VERSION = "2023-06-01"
 
@@ -130,7 +131,8 @@ def _post_with_retry(
 ) -> httpx.Response:
     """Send an AI POST request with bounded retry/backoff on HTTP 429/502/503/504."""
     sleep_fn = sleeper if sleeper is not None else time.sleep
-    with build_intel_client(cfg, transport=transport) as client:
+    bypass_tor = is_loopback_host(urlsplit(url).hostname or "")
+    with build_intel_client(cfg, transport=transport, bypass_tor=bypass_tor) as client:
         for attempt in range(max_attempts):
             try:
                 resp = client.post(url, headers=headers, json=json_body)

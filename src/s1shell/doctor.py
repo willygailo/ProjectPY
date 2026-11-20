@@ -16,6 +16,7 @@ from s1shell.errors import ValidationError
 from s1shell.fingerprint.matcher import load_signatures
 from s1shell.models import SCHEMA_VERSION, utc_now_iso
 from s1shell.scope import ScopeManager
+from s1shell.tor import probe_local_tor_port
 
 
 @dataclass(frozen=True)
@@ -284,6 +285,26 @@ def run_doctor(cfg: RuntimeConfig) -> DoctorReport:
         )
     except Exception as exc:  # noqa: BLE001
         checks.append(DoctorCheck(name="ai_skills", status="error", detail=str(exc)))
+
+    try:
+        tor_stat = probe_local_tor_port(cfg.tor_proxy, timeout=0.4)
+        socks_state = "ok" if tor_stat.socksio_available else "missing"
+        tor_detail = (
+            f"active at {tor_stat.active_proxy} (socksio={socks_state})"
+            if tor_stat.reachable
+            else (
+                f"not running at {cfg.tor_proxy} (optional; enable with `sudo systemctl start tor`)"
+            )
+        )
+        checks.append(
+            DoctorCheck(
+                name="tor_proxy",
+                status="warn" if (cfg.tor_enabled and not tor_stat.reachable) else "ok",
+                detail=tor_detail,
+            )
+        )
+    except Exception as exc:  # noqa: BLE001
+        checks.append(DoctorCheck(name="tor_proxy", status="warn", detail=str(exc)))
 
     healthy = all(c.status != "error" for c in checks)
     return DoctorReport(home_dir=str(cfg.home_dir), checks=checks, healthy=healthy)

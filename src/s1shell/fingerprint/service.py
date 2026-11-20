@@ -35,7 +35,15 @@ class FingerprintService:
     ) -> None:
         self.cfg = cfg
         self.scope_manager = (
-            scope_manager if scope_manager is not None else ScopeManager(cfg.scope_file)
+            scope_manager
+            if scope_manager is not None
+            else ScopeManager(
+                cfg.scope_file,
+                tor_enabled=cfg.tor_enabled,
+                tor_targets=cfg.tor_targets,
+                tor_proxy=cfg.tor_proxy,
+                tor_doh_url=cfg.tor_doh_url,
+            )
         )
         self.audit_logger = audit_logger if audit_logger is not None else AuditLogger(cfg.audit_log)
         self.tls_inspector = tls_inspector if tls_inspector is not None else inspect_tls

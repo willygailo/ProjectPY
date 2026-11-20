@@ -15,9 +15,10 @@ from urllib.parse import urlsplit
 
 import yaml
 
-from s1shell.config import atomic_write_private
+from s1shell.config import DEFAULT_TOR_DOH_URL, DEFAULT_TOR_SOCKS_URL, atomic_write_private
 from s1shell.errors import OutOfScopeError, ValidationError
 from s1shell.models import utc_now, utc_now_iso
+from s1shell.tor import TorDoHResolver, is_onion_host, is_v3_onion_host
 
 IPAddr = ipaddress.IPv4Address | ipaddress.IPv6Address
 IPNet = ipaddress.IPv4Network | ipaddress.IPv6Network
@@ -113,7 +114,7 @@ class ScopeEntry:
             if key not in raw or not str(raw[key]).strip():
                 raise ValidationError(f"Malformed scope entry: missing '{key}'.")
         entry_type = str(raw["type"]).strip()
-        if entry_type not in {"domain", "ip", "cidr", "url_prefix"}:
+        if entry_type not in {"domain", "ip", "cidr", "url_prefix", "onion"}:
             raise ValidationError(f"Malformed scope entry type: '{entry_type}'.")
         return cls(
             id=str(raw["id"]).strip(),
@@ -254,6 +255,11 @@ def parse_target(raw_target: str) -> ParsedTarget:
         is_ip = True
     else:
         host = normalize_hostname(parts.hostname)
+        if is_onion_host(host) and not is_v3_onion_host(host):
+            raise ValidationError(
+                f"Unsupported .onion address '{host}': only 56-character Tor v3 .onion hosts "
+                "are permitted (deprecated v2 .onion addresses are rejected)."
+            )
         is_ip = False
 
     return ParsedTarget(
@@ -305,9 +311,23 @@ def parse_scope_spec(raw_spec: str, *, include_subdomains: bool = False) -> tupl
 
     if text.startswith("*."):
         host = normalize_hostname(text[2:])
+        if is_onion_host(host):
+            if not is_v3_onion_host(host):
+                raise ValidationError(
+                    f"Unsupported .onion address '{host}': only 56-char Tor v3 .onion hosts "
+                    "are permitted."
+                )
+            return "onion", host, True
         return "domain", host, True
 
     host = normalize_hostname(text)
+    if is_onion_host(host):
+        if not is_v3_onion_host(host):
+            raise ValidationError(
+                f"Unsupported .onion address '{host}': only 56-char Tor v3 .onion hosts "
+                "are permitted."
+            )
+        return "onion", host, include_subdomains
     return "domain", host, include_subdomains
 
 
@@ -414,7 +434,7 @@ def _match_specificity(entry: ScopeEntry, target: ParsedTarget) -> tuple[int, in
         return (5, exact_host * 1000 + path_len)
     if entry.type == "ip":
         return (4, 0)
-    if entry.type == "domain":
+    if entry.type in {"domain", "onion"}:
         exact_host = 1 if entry.target == target.host else 0
         return (3 if exact_host else 2, len(entry.target))
     if entry.type == "cidr":
@@ -434,7 +454,7 @@ def entry_matches_structurally(entry: ScopeEntry, target: ParsedTarget) -> bool:
         net = ipaddress.ip_network(entry.target, strict=False)
         return target.ip_obj in net
 
-    if entry.type == "domain":
+    if entry.type in {"domain", "onion"}:
         if target.is_ip:
             return False
         return _host_matches(target.host, entry.target, entry.include_subdomains)
@@ -467,9 +487,27 @@ def entry_matches_structurally(entry: ScopeEntry, target: ParsedTarget) -> bool:
 class ScopeManager:
     """Reads, mutates, and validates scope entries in scope.yaml."""
 
-    def __init__(self, scope_file: Path, resolver: ResolverFn | None = None) -> None:
+    def __init__(
+        self,
+        scope_file: Path,
+        resolver: ResolverFn | None = None,
+        *,
+        tor_enabled: bool = False,
+        tor_targets: bool = False,
+        tor_proxy: str = DEFAULT_TOR_SOCKS_URL,
+        tor_doh_url: str = DEFAULT_TOR_DOH_URL,
+    ) -> None:
         self.scope_file = scope_file
-        self.resolver: ResolverFn = resolver if resolver is not None else default_dns_resolver
+        self.tor_enabled = tor_enabled
+        self.tor_targets = tor_targets
+        self.tor_proxy = tor_proxy
+        self.tor_doh_url = tor_doh_url
+        if resolver is not None:
+            self.resolver: ResolverFn = resolver
+        elif tor_enabled and tor_targets:
+            self.resolver = TorDoHResolver(tor_proxy, doh_url=tor_doh_url).resolve_ips
+        else:
+            self.resolver = default_dns_resolver
 
     def load(self) -> list[ScopeEntry]:
         """Load scope entries from YAML (returns empty list if file does not exist)."""
@@ -752,6 +790,52 @@ class ScopeManager:
 
         matched = structural_matches[0]
 
+        # Authorized Tor v3 `.onion` targets skip clearnet DNS entirely (zero DNS leak)
+        if not parsed.is_ip and is_v3_onion_host(parsed.host):
+            if not self.tor_enabled:
+                return ScopeCheckResult(
+                    in_scope=False,
+                    parsed_target=parsed,
+                    matched_entry=matched,
+                    resolved_ips=[],
+                    pinned_ip=None,
+                    reason=(
+                        f"Authorized .onion target '{parsed.host}' requires `--tor` "
+                        "(SOCKS5h routing; clearnet DNS is never queried for .onion)."
+                    ),
+                )
+            return ScopeCheckResult(
+                in_scope=True,
+                parsed_target=parsed,
+                matched_entry=matched,
+                resolved_ips=["tor-onion"],
+                pinned_ip="tor-onion",
+                reason=(
+                    f"Authorized v3 .onion target by scope entry '{matched.id}' "
+                    f"({matched.auth_ref}) via Tor SOCKS5h."
+                ),
+            )
+
+        # Tor target routing is strictly limited to public clearnet targets (never private/CGNAT)
+        if (
+            self.tor_enabled
+            and self.tor_targets
+            and parsed.is_ip
+            and parsed.ip_obj is not None
+            and is_special_ip(parsed.ip_obj)
+        ):
+            return ScopeCheckResult(
+                in_scope=False,
+                parsed_target=parsed,
+                matched_entry=matched,
+                resolved_ips=[str(parsed.ip_obj)],
+                pinned_ip=None,
+                reason=(
+                    f"Target IP '{parsed.ip_obj}' is private/special and cannot be routed "
+                    "through `--tor --tor-targets`."
+                ),
+            )
+
         if parsed.is_ip and parsed.ip_obj is not None:
             resolved_ips = [str(parsed.ip_obj)]
         else:
@@ -788,6 +872,18 @@ class ScopeManager:
                         pinned_ip=None,
                         reason=(
                             f"Target '{parsed.host}' resolved to explicitly excluded IP '{ip_str}'."
+                        ),
+                    )
+                if self.tor_enabled and self.tor_targets and is_special_ip(ip_obj):
+                    return ScopeCheckResult(
+                        in_scope=False,
+                        parsed_target=parsed,
+                        matched_entry=matched,
+                        resolved_ips=resolved_ips,
+                        pinned_ip=None,
+                        reason=(
+                            f"Target '{parsed.host}' resolved to private/special IP '{ip_str}', "
+                            "which is forbidden under `--tor --tor-targets`."
                         ),
                     )
                 if is_special_ip(ip_obj) and not _ip_explicitly_covered(ip_obj, allow_entries):

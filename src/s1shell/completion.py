@@ -6,9 +6,12 @@ from s1shell.errors import ValidationError
 
 _MODULES = (
     "scope cve intel codec profile fingerprint report audit doctor completion ai assess diff "
-    "remediate mcp"
+    "remediate mcp tor"
 )
-_COMMON_FLAGS = "--format --out --verbose --no-color --authorized --scope-file --home --help"
+_COMMON_FLAGS = (
+    "--format --out --verbose --no-color --authorized --scope-file --home "
+    "--tor --tor-targets --tor-proxy --help"
+)
 _MCP_CLIENTS = "antigravity claude cursor vscode windsurf http"
 _MCP_FLAGS = (
     "--transport --host --port --token --generate-token --allow-origin "
@@ -195,6 +198,13 @@ _s1shell_completions() {{
                 COMPREPLY=( $(compgen -W "{_MCP_FLAGS}" -- "${{cur}}") )
             fi
             ;;
+        tor)
+            if [[ ${{COMP_CWORD}} -eq 2 ]]; then
+                COMPREPLY=( $(compgen -W "status check" -- "${{cur}}") )
+            else
+                COMPREPLY=( $(compgen -W "{_COMMON_FLAGS}" -- "${{cur}}") )
+            fi
+            ;;
         *)
             COMPREPLY=( $(compgen -W "{_COMMON_FLAGS}" -- "${{cur}}") )
             ;;
@@ -224,6 +234,7 @@ _s1shell() {
         'diff:Compare baseline vs current assessment artifacts'
         'remediate:Generate offline deterministic hardening config snippets'
         'mcp:Run online Streamable HTTP or local stdio read-only MCP server'
+        'tor:Check local Tor SOCKS5h readiness or verify Tor exit egress'
     )
 
     _arguments -C \\
@@ -302,6 +313,14 @@ _s1shell() {
                     )
                     _describe 'mcp command' subcmds
                     ;;
+                tor)
+                    local -a subcmds
+                    subcmds=(
+                        'status:Offline local Tor binary and SOCKS5h port readiness check'
+                        'check:Verify live Tor exit egress via check.torproject.org'
+                    )
+                    _describe 'tor command' subcmds
+                    ;;
                 intel)
                     local -a subcmds
                     subcmds=(
@@ -348,6 +367,7 @@ complete -c s1shell -n "__fish_use_subcommand" -a "assess" -d "Single or batch t
 complete -c s1shell -n "__fish_use_subcommand" -a "diff" -d "Compare baseline vs current assess"
 complete -c s1shell -n "__fish_use_subcommand" -a "remediate" -d "Offline hardening config playbook"
 complete -c s1shell -n "__fish_use_subcommand" -a "mcp" -d "Online HTTP or local stdio MCP server"
+complete -c s1shell -n "__fish_use_subcommand" -a "tor" -d "Tor SOCKS5h readiness and exit check"
 
 complete -c s1shell -n "__fish_seen_subcommand_from scope" -a "add import list check remove expire"
 complete -c s1shell -n "__fish_seen_subcommand_from cve" -a "search get audit cache"
@@ -356,6 +376,7 @@ complete -c s1shell -n "__fish_seen_subcommand_from audit" -a "list verify"
 complete -c s1shell -n "__fish_seen_subcommand_from completion" -a "bash zsh fish"
 complete -c s1shell -n "__fish_seen_subcommand_from ai" -a "env analyze skills investigate chat"
 complete -c s1shell -n "__fish_seen_subcommand_from mcp" -a "serve config ping"
+complete -c s1shell -n "__fish_seen_subcommand_from tor" -a "status check"
 complete -c s1shell -n "__fish_seen_subcommand_from intel" -a "env lookup advisory ct rdap"
 complete -c s1shell -n "__fish_seen_subcommand_from codec" -a "decode encode inspect hash"
 

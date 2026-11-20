@@ -33,7 +33,7 @@ def test_mcp_protocol_tools_resources_prompts_and_scoped_opt_in(
     tmp_config: RuntimeConfig,
     tmp_path: Path,
 ) -> None:
-    # Default server: 22 online/offline read-only tools (zero target contact)
+    # Default server: 23 online/offline read-only tools (zero target contact)
     srv = S1ShellMCPServer(tmp_config)
     init = srv.handle_request(
         {
@@ -52,8 +52,9 @@ def test_mcp_protocol_tools_resources_prompts_and_scoped_opt_in(
     )
     assert tools_resp is not None
     tool_names = [t["name"] for t in tools_resp["result"]["tools"]]
-    assert len(tool_names) == 22
+    assert len(tool_names) == 23
     assert "s1shell_ai_analyze" in tool_names
+    assert "s1shell_tor_status" in tool_names
     assert "s1shell_profile" not in tool_names
 
     # Disabled target tool fails closed with isError=True
@@ -133,14 +134,14 @@ def test_mcp_protocol_tools_resources_prompts_and_scoped_opt_in(
     with pytest.raises(UnauthorizedError):
         S1ShellMCPServer(tmp_config, allow_scoped_targets=True, authorized=False)
 
-    # Opt-in scoped targets WITH `--authorized` exposes 25 tools and STILL enforces scope.yaml
+    # Opt-in scoped targets WITH `--authorized` exposes 26 tools and STILL enforces scope.yaml
     scoped_srv = S1ShellMCPServer(tmp_config, allow_scoped_targets=True, authorized=True)
     scoped_tools = scoped_srv.handle_request(
         {"jsonrpc": "2.0", "id": 8, "method": "tools/list", "params": {}}
     )
     assert scoped_tools is not None
     scoped_names = {t["name"] for t in scoped_tools["result"]["tools"]}
-    assert len(scoped_names) == 25
+    assert len(scoped_names) == 26
     assert {"s1shell_profile", "s1shell_fingerprint", "s1shell_assess"} <= scoped_names
 
     # Calling s1shell_profile against an out-of-scope target is blocked & audit-logged
@@ -188,7 +189,7 @@ def test_mcp_streamable_http_server_auth_origin_ping_and_cli_config(
             hdata = health.json()
             assert hdata["status"] == "ok"
             assert hdata["transport"] == "streamable-http"
-            assert hdata["tools_count"] == 22
+            assert hdata["tools_count"] == 23
             assert hdata["auth_required"] is True
 
             # 2. Missing / invalid Bearer token -> 401 Unauthorized
@@ -238,7 +239,7 @@ def test_mcp_streamable_http_server_auth_origin_ping_and_cli_config(
         # 6. `ping_mcp_http` + CLI `s1shell mcp ping` succeed against live HTTP server
         ping_data = ping_mcp_http(mcp_url, token=secret_token)
         assert ping_data["healthy"] is True
-        assert ping_data["tools_count"] == 22
+        assert ping_data["tools_count"] == 23
         assert ping_data["resources_count"] == 4
         assert ping_data["prompts_count"] == 9
         assert ping_data["auth_used"] is True

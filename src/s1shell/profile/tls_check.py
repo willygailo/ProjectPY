@@ -18,6 +18,7 @@ from cryptography.x509.oid import ExtensionOID, ObjectIdentifier
 
 from s1shell.errors import NetworkError
 from s1shell.profile.models import CertChainEntry, TLSResult
+from s1shell.tor import open_socks5h_socket
 
 _TLS_FEATURE_OID = ObjectIdentifier("1.3.6.1.5.5.7.1.24")
 
@@ -310,6 +311,7 @@ def _single_handshake(
     verify: bool,
     tls_version: ssl.TLSVersion | None = None,
     legacy_probe: bool = False,
+    tor_proxy: str | None = None,
 ) -> tuple[str | None, str | None, str | None, bytes | None, list[bytes]]:
     ctx = (
         ssl.create_default_context(cafile=cafile)
@@ -334,8 +336,13 @@ def _single_handshake(
             ctx.maximum_version = tls_version
 
     server_hostname = None if is_ip else host
+    raw_sock = (
+        open_socks5h_socket(tor_proxy, target_host=host, target_port=port, timeout=timeout)
+        if tor_proxy is not None
+        else socket.create_connection((pinned_ip, port), timeout=timeout)
+    )
     with (
-        socket.create_connection((pinned_ip, port), timeout=timeout) as raw_sock,
+        raw_sock,
         ctx.wrap_socket(raw_sock, server_hostname=server_hostname) as tls_sock,
     ):
         cipher = tls_sock.cipher()
@@ -369,6 +376,7 @@ def _probe_tls_versions(
     timeout: float,
     is_ip: bool,
     cafile: str | None,
+    tor_proxy: str | None = None,
 ) -> tuple[list[str], list[str]]:
     """Probe TLS 1.0–1.3 support and distinguish client-side OpenSSL blocks."""
     candidates = [
@@ -394,6 +402,7 @@ def _probe_tls_versions(
                 verify=False,
                 tls_version=version_enum,
                 legacy_probe=is_legacy,
+                tor_proxy=tor_proxy,
             )
             supported.append(negotiated or label)
         except ValueError:
@@ -407,7 +416,7 @@ def _probe_tls_versions(
             ):
                 client_blocked.append(label)
             continue
-        except OSError:
+        except (OSError, NetworkError):
             continue
     return supported, client_blocked
 
@@ -421,6 +430,7 @@ def inspect_tls(
     is_ip: bool = False,
     cafile: str | None = None,
     check_versions: bool = False,
+    tor_proxy: str | None = None,
 ) -> tuple[TLSResult, str | None]:
     """Perform a single TLS handshake (or optional bounded version checks) and parse X.509 cert."""
     verified = False
@@ -440,6 +450,7 @@ def inspect_tls(
             is_ip=is_ip,
             cafile=cafile,
             verify=True,
+            tor_proxy=tor_proxy,
         )
         verified = True
     except ssl.SSLCertVerificationError as exc:
@@ -454,6 +465,7 @@ def inspect_tls(
                 is_ip=is_ip,
                 cafile=cafile,
                 verify=False,
+                tor_proxy=tor_proxy,
             )
         except (ssl.SSLError, OSError) as inner_exc:
             raise NetworkError(f"TLS handshake failed for '{host}': {inner_exc}") from inner_exc
@@ -472,6 +484,7 @@ def inspect_tls(
             timeout=timeout,
             is_ip=is_ip,
             cafile=cafile,
+            tor_proxy=tor_proxy,
         )
     else:
         supported_versions = [negotiated] if negotiated else []

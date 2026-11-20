@@ -12,11 +12,12 @@ from s1shell.guard import TargetContext, authorize_and_run
 from s1shell.profile.dns_check import RecordResolver, collect_dns_records
 from s1shell.profile.header_check import analyze_headers, detect_http3_from_alt_svc
 from s1shell.profile.html_check import analyze_html_body
-from s1shell.profile.models import ProfileResult, ProtocolInfo, WellKnownCheck
+from s1shell.profile.models import DNSRecords, ProfileResult, ProtocolInfo, WellKnownCheck
 from s1shell.profile.tls_check import inspect_tls
 from s1shell.profile.well_known import inspect_http_methods, inspect_well_known
 from s1shell.scope import ScopeManager
 from s1shell.target_fetch import TLSInspectorFn, fetch_target_snapshot
+from s1shell.tor import TorDoHResolver, is_v3_onion_host
 
 
 class ProfileService:
@@ -35,7 +36,15 @@ class ProfileService:
     ) -> None:
         self.cfg = cfg
         self.scope_manager = (
-            scope_manager if scope_manager is not None else ScopeManager(cfg.scope_file)
+            scope_manager
+            if scope_manager is not None
+            else ScopeManager(
+                cfg.scope_file,
+                tor_enabled=cfg.tor_enabled,
+                tor_targets=cfg.tor_targets,
+                tor_proxy=cfg.tor_proxy,
+                tor_doh_url=cfg.tor_doh_url,
+            )
         )
         self.audit_logger = audit_logger if audit_logger is not None else AuditLogger(cfg.audit_log)
         self.dns_resolver = dns_resolver
@@ -61,13 +70,25 @@ class ProfileService:
             pinned_ip = ctx.scope_result.pinned_ip
             assert scope_entry is not None and pinned_ip is not None
 
-            dns_records = collect_dns_records(
-                parsed.host,
-                is_ip=parsed.is_ip,
-                timeout=min(self.cfg.timeout_seconds, 5.0),
-                resolver=self.dns_resolver,
-                include_security=check_dns_security,
-            )
+            if not parsed.is_ip and is_v3_onion_host(parsed.host):
+                dns_records = DNSRecords(
+                    errors=["Clearnet DNS skipped for authorized Tor v3 .onion service"]
+                )
+            else:
+                effective_dns_resolver = self.dns_resolver
+                if effective_dns_resolver is None and self.cfg.tor_enabled and self.cfg.tor_targets:
+                    effective_dns_resolver = TorDoHResolver(
+                        self.cfg.tor_proxy,
+                        doh_url=self.cfg.tor_doh_url,
+                        timeout=min(self.cfg.timeout_seconds, 10.0),
+                    )
+                dns_records = collect_dns_records(
+                    parsed.host,
+                    is_ip=parsed.is_ip,
+                    timeout=min(self.cfg.timeout_seconds, 5.0),
+                    resolver=effective_dns_resolver,
+                    include_security=check_dns_security,
+                )
 
             snapshot = fetch_target_snapshot(
                 self.cfg,

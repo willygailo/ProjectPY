@@ -12,6 +12,7 @@ import httpx
 
 from s1shell.config import RuntimeConfig
 from s1shell.errors import NetworkError
+from s1shell.tor import validate_tor_proxy_url
 
 SocketOption: TypeAlias = (
     tuple[int, int, int] | tuple[int, int, bytes | bytearray] | tuple[int, int, None, int]
@@ -121,8 +122,22 @@ def build_target_client(
     pinned_ips: Sequence[str] | None = None,
     verify: ssl.SSLContext | bool = True,
     transport: httpx.BaseTransport | None = None,
+    tor_proxy: str | None = None,
 ) -> httpx.Client:
-    """Create a read-only, non-redirecting, IP-pinned httpx client for target checks."""
+    """Create a read-only, non-redirecting httpx client (IP-pinned direct or Tor SOCKS5h)."""
+    if transport is None and tor_proxy is not None:
+        validated_proxy = validate_tor_proxy_url(tor_proxy)
+        return httpx.Client(
+            proxy=validated_proxy,
+            verify=verify,
+            headers={"User-Agent": cfg.user_agent},
+            timeout=httpx.Timeout(cfg.timeout_seconds),
+            follow_redirects=False,
+            max_redirects=0,
+            trust_env=False,
+            http2=True,
+        )
+
     chosen_transport = (
         transport
         if transport is not None
@@ -149,8 +164,20 @@ def build_intel_client(
     *,
     transport: httpx.BaseTransport | None = None,
     follow_redirects: bool = False,
+    bypass_tor: bool = False,
 ) -> httpx.Client:
-    """Create a conservative httpx client for public vulnerability & OSINT intel APIs."""
+    """Create a conservative httpx client for public intel/CVE/AI APIs (optional Tor SOCKS5h)."""
+    if transport is None and cfg.tor_enabled and not bypass_tor:
+        validated_proxy = validate_tor_proxy_url(cfg.tor_proxy)
+        return httpx.Client(
+            proxy=validated_proxy,
+            headers={"User-Agent": cfg.user_agent, "Accept": "application/json"},
+            timeout=httpx.Timeout(cfg.timeout_seconds),
+            follow_redirects=follow_redirects,
+            max_redirects=3 if follow_redirects else 0,
+            http2=True,
+            trust_env=False,
+        )
     return httpx.Client(
         transport=transport,
         headers={"User-Agent": cfg.user_agent, "Accept": "application/json"},

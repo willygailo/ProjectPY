@@ -37,6 +37,7 @@ from s1shell.profile.models import ProfileResult
 from s1shell.report.sarif import render_dependency_sarif
 from s1shell.report.service import ReportService
 from s1shell.scope import ScopeCheckResult, ScopeEntry, ScopeImportResult
+from s1shell.tor import TorCheckResult, TorStatusResult
 
 
 def make_console(*, no_color: bool = False, file: TextIO | None = None) -> Console:
@@ -1888,4 +1889,78 @@ def render_mcp_ping(
     tbl.add_row("Prompts (AI Skills)", str(result.get("prompts_count", 0)))
     tbl.add_row("Scoped Targets Mode", str(result.get("scoped_targets_enabled", False)))
     tbl.add_row("Bearer Auth Used", str(result.get("auth_used", False)))
+    _emit_tables([tbl], console=console, out_file=out_file, stdout=stdout)
+
+
+def render_tor_status(
+    result: TorStatusResult,
+    *,
+    fmt: str,
+    console: Console,
+    out_file: Path | None = None,
+    stdout: TextIO | None = None,
+) -> None:
+    """Render `s1shell tor status` offline local Tor readiness report."""
+    norm = _require_format(fmt, ("table", "json", "md"), command="tor status")
+    if norm == "json":
+        write_or_print(dumps_json(result), out_file=out_file, stdout=stdout)
+        return
+    if norm == "md":
+        lines = [
+            "# S1shell Local Tor Readiness (Offline Check)",
+            "",
+            f"- **Configured Proxy:** `{result.configured_proxy}`",
+            f"- **Reachable:** `{result.reachable}` (`{result.active_proxy or 'none'}`)",
+            f"- **Tor Binary:** `{result.tor_binary or 'not found'}`",
+            f"- **socksio Library:** `{result.socksio_available}`",
+            f"- **Detail:** {result.detail}",
+        ]
+        write_or_print("\n".join(lines), out_file=out_file, stdout=stdout)
+        return
+
+    tbl = Table(title="S1shell Local Tor Status (Offline)")
+    tbl.add_column("Check", style="cyan", no_wrap=True)
+    tbl.add_column("Value")
+    tbl.add_row("Configured Proxy", result.configured_proxy)
+    tbl.add_row("Port Reachable", f"{result.reachable} ({result.active_proxy or 'none'})")
+    tbl.add_row("Tor Binary", result.tor_binary or "not found")
+    tbl.add_row("socksio Package", "installed" if result.socksio_available else "MISSING")
+    tbl.add_row("Detail", result.detail)
+    _emit_tables([tbl], console=console, out_file=out_file, stdout=stdout)
+
+
+def render_tor_check(
+    result: TorCheckResult,
+    *,
+    fmt: str,
+    console: Console,
+    out_file: Path | None = None,
+    stdout: TextIO | None = None,
+) -> None:
+    """Render `s1shell tor check` live Tor exit verification report."""
+    norm = _require_format(fmt, ("table", "json", "md"), command="tor check")
+    if norm == "json":
+        write_or_print(dumps_json(result), out_file=out_file, stdout=stdout)
+        return
+    if norm == "md":
+        lines = [
+            "# S1shell Tor Egress Verification",
+            "",
+            f"- **Proxy:** `{result.proxy_url}`",
+            f"- **Confirmed Tor (`IsTor`):** `{result.is_tor}`",
+            f"- **Exit IP:** `{result.exit_ip or 'unknown'}`",
+            f"- **Latency:** `{result.latency_ms} ms`",
+            f"- **Detail:** {result.detail}",
+        ]
+        write_or_print("\n".join(lines), out_file=out_file, stdout=stdout)
+        return
+
+    tbl = Table(title="S1shell Tor Egress Verification")
+    tbl.add_column("Metric", style="cyan", no_wrap=True)
+    tbl.add_column("Value")
+    tbl.add_row("SOCKS5h Proxy", result.proxy_url)
+    tbl.add_row("Confirmed Tor", str(result.is_tor))
+    tbl.add_row("Tor Exit IP", result.exit_ip or "unknown")
+    tbl.add_row("Latency", f"{result.latency_ms} ms")
+    tbl.add_row("Detail", result.detail)
     _emit_tables([tbl], console=console, out_file=out_file, stdout=stdout)

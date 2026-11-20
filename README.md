@@ -289,9 +289,9 @@ skills:
 
 <a id="online-and-local-mcp-server-s1shell-mcp-serve"></a>
 <details open>
-<summary><b>🌐 Online &amp; Local Read-Only MCP Server (<code>s1shell mcp serve</code> — Streamable HTTP + Stdio, 22–25 Tools)</b></summary>
+<summary><b>🌐 Online &amp; Local Read-Only MCP Server (<code>s1shell mcp serve</code> — Streamable HTTP + Stdio, 23–26 Tools)</b></summary>
 
-S1shell runs as a **live online MCP server** (MCP `2025-03-26` + `2024-11-05` compatible) over **Online Streamable HTTP** (`--transport http`) or **Local Stdio** (`--transport stdio`), exposing **22 default online/offline read-only tools**, **4 live MCP Resources**, and **9+ native MCP Prompts** (your defensive AI skills):
+S1shell runs as a **live online MCP server** (MCP `2025-03-26` + `2024-11-05` compatible) over **Online Streamable HTTP** (`--transport http`) or **Local Stdio** (`--transport stdio`), exposing **23 default online/offline read-only tools**, **4 live MCP Resources**, and **9+ native MCP Prompts** (your defensive AI skills):
 
 #### Start the Online Streamable HTTP MCP Server
 
@@ -324,7 +324,7 @@ s1shell mcp config antigravity --transport http --url http://127.0.0.1:8765/mcp 
 | **Live Passive Intel &amp; OSINT** | Online (zero target contact) | `s1shell_intel_lookup` (VT, GreyNoise, urlscan.io, RDAP), `s1shell_intel_advisory` (GHSA), `s1shell_intel_ct` (`crt.sh`), `s1shell_intel_rdap` |
 | **Live CVE &amp; SBOM Feeds** | Online (zero target contact) | `s1shell_cve_search` (NVD 2.0 + KEV/EPSS), `s1shell_cve_get` (NVD + CVE.org + GHSA), `s1shell_cve_audit` (OSV.dev across 14 lockfile/SBOM formats + `recursive`) |
 | **Defensive AI &amp; Skills** | Online / Local Ollama | `s1shell_ai_analyze` (skills, pipelines, NDA redaction on by default, grounding check), `s1shell_ai_skills_list`, `s1shell_ai_prepare_context` |
-| **Governance, Analysis &amp; Codec** | Online DNS / Offline | `s1shell_doctor`, `s1shell_scope_list`, `s1shell_scope_check`, `s1shell_audit_list`, `s1shell_audit_verify`, `s1shell_fingerprint_from_profile`, `s1shell_assess_diff`, `s1shell_remediate`, `s1shell_codec_decode`, `s1shell_codec_encode`, `s1shell_codec_inspect`, `s1shell_codec_hash` |
+| **Governance, Analysis &amp; Codec** | Online DNS / Offline | `s1shell_doctor`, `s1shell_tor_status`, `s1shell_scope_list`, `s1shell_scope_check`, `s1shell_audit_list`, `s1shell_audit_verify`, `s1shell_fingerprint_from_profile`, `s1shell_assess_diff`, `s1shell_remediate`, `s1shell_codec_decode`, `s1shell_codec_encode`, `s1shell_codec_inspect`, `s1shell_codec_hash` |
 | **Scoped Target Tools *(Opt-In)*** | Online *(requires `--allow-scoped-targets --authorized`)* | `s1shell_profile`, `s1shell_fingerprint`, `s1shell_assess` — fail-closed `scope.yaml` + SHA-256 `audit.log` on every call |
 | **Native MCP Resources &amp; Prompts** | Built-in | Resources: `s1shell://doctor`, `s1shell://scope`, `s1shell://skills`, `s1shell://audit/recent` · Prompts: all 9 bundled + custom `~/.s1shell/skills.d/*.yaml` skills |
 
@@ -357,6 +357,43 @@ s1shell mcp config antigravity --transport http --url http://127.0.0.1:8765/mcp 
   }
 }
 ```
+
+</details>
+
+<details>
+<summary><b>🧅 Optional Defensive Tor (<code>socks5h://</code>) Routing — Analyst OPSEC &amp; Zero-Leak Target Assessment</b></summary>
+
+S1shell supports fail-closed local Tor (`socks5h://127.0.0.1:9050` / `9150`) with **zero local DNS leaks**, **zero silent clearnet fallback**, and **zero IP rotation/WAF evasion**:
+
+```bash
+# 1. Start Tor on Kali Linux & verify readiness
+sudo systemctl enable --now tor
+s1shell tor status       # offline check (tor binary, socksio, port 9050/9150)
+s1shell tor check        # live exit verification via check.torproject.org/api/ip
+
+# 2. Analyst OPSEC mode (`--tor`): routes passive OSINT, CVE, SBOM, & Cloud AI through Tor
+#    (auto-bypasses Tor for local Ollama/MCP; clearnet targets stay direct IP-pinned)
+s1shell intel ct target.com --tor
+s1shell cve search --keyword "nginx 1.24" --enrich --tor
+
+# 3. Full zero-leak target URL/domain assessment over Tor (`--tor --tor-targets --authorized`)
+#    Routes scope DNS & DNS hygiene via DoH-over-Tor, TLS via SOCKS5h tunnel, and single-GET HTTP via socks5h://
+s1shell assess https://www.target.com --authorized \
+  --tor --tor-targets --enrich-cve --intel --well-known --check-methods \
+  --out-dir ./results/target-via-tor
+
+# 4. Direct vs Tor Edge Perspective Diff (detect WAF Tor-exit blocking & split-horizon header leaks)
+s1shell assess https://www.target.com --authorized --skip-cve --out-dir ./results/target-direct
+s1shell assess https://www.target.com --authorized --tor --tor-targets --skip-cve --out-dir ./results/target-tor
+s1shell diff ./results/target-direct/assess.json ./results/target-tor/assess.json
+
+# 5. Authorized Tor v3 `.onion` hidden-service defensive posture audit (zero clearnet DNS)
+s1shell scope add <56-char-v3-address>.onion --owner "Org" --ref "SOW-ONION-1" --expires 2026-12-31
+s1shell assess http://<56-char-v3-address>.onion --authorized --tor --tor-targets --skip-cve --out-dir ./results/onion
+```
+
+> [!NOTE]
+> **OPSEC & Scope Notes:** Personal API keys (`NVD_API_KEY`, `VIRUSTOTAL_API_KEY`, `GITHUB_TOKEN`, etc.) still identify your API account even over Tor, and some Cloudflare-fronted APIs may rate-limit Tor exit nodes. `--tor --tor-targets` strictly permits **public clearnet targets** (or authorized v3 `.onion` hosts) and always blocks private/loopback/CGNAT/metadata IPs.
 
 </details>
 
@@ -712,7 +749,8 @@ s1shell audit verify
 | `s1shell report build` | None (offline) | Compile artifacts into JSON, Markdown, SARIF 2.1.0, or HTML |
 | `s1shell ai env \| skills \| analyze \| investigate \| chat` | Configured AI endpoint (or `--local-only` Ollama) | Defensive AI skills library, multi-stage pipelines, reversible NDA redaction, grounding checks, read-only ReAct investigator & copilot |
 | `s1shell audit list \| verify` | None (offline) | Inspect & verify SHA-256 hash chain integrity of `audit.log` |
-| `s1shell mcp serve \| config \| ping` | Online HTTP / Stdio (intel + AI; opt-in scoped targets) | Online Streamable HTTP & local stdio MCP server (22–25 tools, Resources, Prompts, Bearer auth, Origin guard), client config generator, & live ping |
+| `s1shell mcp serve \| config \| ping` | Online HTTP / Stdio (intel + AI; opt-in scoped targets) | Online Streamable HTTP & local stdio MCP server (23–26 tools, Resources, Prompts, Bearer auth, Origin guard), client config generator, & live ping |
+| `s1shell tor status \| check` | Offline (`status`) / Tor exit check (`check`) | Check local Tor SOCKS5h readiness or verify live Tor exit egress (fail-closed) |
 | `s1shell doctor` / `s1shell completion {bash,zsh,fish}` | None (offline) | Local environment diagnostics & shell tab-completion |
 
 </details>
@@ -729,6 +767,9 @@ s1shell audit verify
 | `--authorized` | Non-interactive authorization confirmation for target-touching commands |
 | `--scope-file FILE` | Override path to `scope.yaml` |
 | `--home DIR` | Override state directory (default `~/.s1shell` or `$S1SHELL_HOME`) |
+| `--tor` | Route passive OSINT, CVE, SBOM, cloud AI, & authorized `.onion` traffic via local Tor `socks5h://` (fail-closed) |
+| `--tor-targets` | With `--tor`, also route authorized public target URL/domain checks (DoH DNS, SOCKS5h TLS, single-GET HTTP) over Tor |
+| `--tor-proxy URL` | Custom local loopback Tor `socks5h://` proxy URL (default `socks5h://127.0.0.1:9050`) |
 | `--no-color` | Disable ANSI colors in terminal tables |
 | `--verbose` | Print full tracebacks to stderr on unexpected errors |
 | `--version` | Show installed `s1shell` version |

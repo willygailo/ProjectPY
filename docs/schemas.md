@@ -30,6 +30,7 @@ All JSON outputs emitted with `--format json` include:
   - `"ai_investigation_report"` (`s1shell ai investigate`)
   - `"ai_prepared_context"` (`s1shell_ai_prepare_context` MCP tool)
   - `"mcp_ping_report"` (`s1shell mcp ping`)
+  - `"tor_status_report"` / `"tor_check_report"` (`s1shell tor status|check`)
 
 ## 1. Scope File (`~/.s1shell/scope.yaml`)
 

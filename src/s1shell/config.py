@@ -35,6 +35,8 @@ DEFAULT_GREYNOISE_API_URL = "https://api.greynoise.io/v3/community"
 DEFAULT_URLSCAN_API_URL = "https://urlscan.io/api/v1/search/"
 DEFAULT_CRTSH_API_URL = "https://crt.sh/"
 DEFAULT_RDAP_BASE_URL = "https://rdap.org"
+DEFAULT_TOR_SOCKS_URL = "socks5h://127.0.0.1:9050"
+DEFAULT_TOR_DOH_URL = "https://cloudflare-dns.com/dns-query"
 SUPPORTED_AI_PROVIDERS = ("anthropic", "ollama", "openai_compat", "gemini")
 
 
@@ -179,6 +181,10 @@ class RuntimeConfig:
     urlscan_api_url: str = DEFAULT_URLSCAN_API_URL
     crtsh_api_url: str = DEFAULT_CRTSH_API_URL
     rdap_base_url: str = DEFAULT_RDAP_BASE_URL
+    tor_enabled: bool = False
+    tor_targets: bool = False
+    tor_proxy: str = DEFAULT_TOR_SOCKS_URL
+    tor_doh_url: str = DEFAULT_TOR_DOH_URL
 
     @classmethod
     def from_env(
@@ -186,6 +192,9 @@ class RuntimeConfig:
         home_override: Path | str | None = None,
         scope_file_override: Path | str | None = None,
         timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
+        tor_enabled: bool | None = None,
+        tor_targets: bool | None = None,
+        tor_proxy: str | None = None,
     ) -> RuntimeConfig:
         """Build a RuntimeConfig honoring CLI overrides and environment variables."""
         home = resolve_home_dir(home_override)
@@ -198,6 +207,21 @@ class RuntimeConfig:
         project_env = (
             (Path.cwd() / ".env").resolve() if (home_override is None and not env_home) else None
         )
+        env_tor = os.environ.get("S1SHELL_TOR", "").strip().lower() in {"1", "true", "yes", "on"}
+        env_tor_targets = os.environ.get("S1SHELL_TOR_TARGETS", "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        env_tor_proxy = os.environ.get("S1SHELL_TOR_PROXY", "").strip()
+        resolved_tor = env_tor if tor_enabled is None else bool(tor_enabled)
+        resolved_tor_targets = env_tor_targets if tor_targets is None else bool(tor_targets)
+        resolved_tor_proxy = (
+            tor_proxy.strip()
+            if tor_proxy and tor_proxy.strip()
+            else (env_tor_proxy or DEFAULT_TOR_SOCKS_URL)
+        )
         return cls(
             home_dir=home,
             scope_file=scope_path,
@@ -206,6 +230,9 @@ class RuntimeConfig:
             env_file=home / ".env",
             project_env_file=project_env,
             timeout_seconds=timeout_seconds,
+            tor_enabled=resolved_tor,
+            tor_targets=resolved_tor_targets,
+            tor_proxy=resolved_tor_proxy,
         )
 
     def get_env_var(self, name: str) -> tuple[str | None, str]:

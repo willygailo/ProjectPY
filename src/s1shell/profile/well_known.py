@@ -18,6 +18,7 @@ from s1shell.errors import NetworkError
 from s1shell.http import build_target_client, fetch_bounded
 from s1shell.profile.models import WellKnownCheck
 from s1shell.scope import ParsedTarget
+from s1shell.tor import is_v3_onion_host
 
 _MAX_META_BYTES = 128 * 1024  # 128 KiB cap for metadata text files
 
@@ -190,7 +191,10 @@ def inspect_http_methods(
     http_transport: httpx.BaseTransport | None = None,
 ) -> tuple[list[str], list[str]]:
     """Send 1 read-only `OPTIONS` request to inspect advertised HTTP methods passively."""
-    url = parsed.to_url("https")
+    is_onion = not parsed.is_ip and is_v3_onion_host(parsed.host)
+    default_scheme = "http" if is_onion else "https"
+    url = parsed.to_url(default_scheme)
+    tor_proxy = cfg.tor_proxy if (cfg.tor_enabled and (cfg.tor_targets or is_onion)) else None
     with build_target_client(
         cfg,
         expected_host=parsed.host,
@@ -198,6 +202,7 @@ def inspect_http_methods(
         pinned_ips=pinned_ips,
         verify=verify,
         transport=http_transport,
+        tor_proxy=tor_proxy,
     ) as client:
         try:
             resp = fetch_bounded(client, "OPTIONS", url, max_bytes=16 * 1024)
@@ -283,13 +288,16 @@ def inspect_well_known(
     http_transport: httpx.BaseTransport | None = None,
 ) -> WellKnownCheck:
     """Perform bounded read-only GETs on standard RFC well-known metadata endpoints."""
-    scheme = parsed.effective_scheme("https")
-    port = parsed.effective_port("https")
+    is_onion = not parsed.is_ip and is_v3_onion_host(parsed.host)
+    default_scheme = "http" if is_onion else "https"
+    scheme = parsed.effective_scheme(default_scheme)
+    port = parsed.effective_port(default_scheme)
     default_port = 80 if scheme == "http" else 443
     is_v6 = parsed.is_ip and parsed.ip_obj and parsed.ip_obj.version == 6
     host_fmt = f"[{parsed.host}]" if is_v6 else parsed.host
     port_part = f":{port}" if port != default_port else ""
     origin = f"{scheme}://{host_fmt}{port_part}"
+    tor_proxy = cfg.tor_proxy if (cfg.tor_enabled and (cfg.tor_targets or is_onion)) else None
 
     sec_present = False
     sec_status: int | None = None
@@ -324,6 +332,7 @@ def inspect_well_known(
         pinned_ips=pinned_ips,
         verify=verify,
         transport=http_transport,
+        tor_proxy=tor_proxy,
     ) as client:
         try:
             sec_resp = fetch_bounded(

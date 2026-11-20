@@ -34,6 +34,7 @@ from s1shell.intel.service import IntelService
 from s1shell.models import dumps_json
 from s1shell.profile.service import ProfileService
 from s1shell.scope import ScopeManager
+from s1shell.tor import probe_local_tor_port
 
 MCP_PROTOCOL_VERSION = "2025-03-26"
 SUPPORTED_MCP_PROTOCOL_VERSIONS = ("2025-03-26", "2024-11-05")
@@ -413,6 +414,24 @@ BASE_TOOLS_SPEC: list[dict[str, Any]] = [
             },
         },
     },
+    {
+        "name": "s1shell_tor_status",
+        "description": (
+            "Check local Tor binary, socksio support, and loopback SOCKS5h port reachability "
+            "(offline local socket check; zero internet traffic)."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "proxy_url": {
+                    "type": "string",
+                    "description": (
+                        "Optional loopback socks5h:// URL to probe (default 127.0.0.1:9050)."
+                    ),
+                }
+            },
+        },
+    },
 ]
 
 SCOPED_TARGET_TOOLS_SPEC: list[dict[str, Any]] = [
@@ -718,7 +737,15 @@ class S1ShellMCPServer:
         self.allow_scoped_targets = allow_scoped_targets
         self.authorized = authorized
         self.scope_manager = (
-            scope_manager if scope_manager is not None else ScopeManager(cfg.scope_file)
+            scope_manager
+            if scope_manager is not None
+            else ScopeManager(
+                cfg.scope_file,
+                tor_enabled=cfg.tor_enabled,
+                tor_targets=cfg.tor_targets,
+                tor_proxy=cfg.tor_proxy,
+                tor_doh_url=cfg.tor_doh_url,
+            )
         )
         self.audit_logger = audit_logger if audit_logger is not None else AuditLogger(cfg.audit_log)
         self.cve_service = (
@@ -1026,6 +1053,9 @@ class S1ShellMCPServer:
             return dumps_json({"events": events})
         if name == "s1shell_audit_verify":
             return dumps_json(self.audit_logger.verify())
+        if name == "s1shell_tor_status":
+            p_url = str(arguments.get("proxy_url") or self.cfg.tor_proxy)
+            return dumps_json(probe_local_tor_port(p_url))
 
         # Opt-in fail-closed guarded scoped target tools
         if name in {"s1shell_profile", "s1shell_fingerprint", "s1shell_assess"}:

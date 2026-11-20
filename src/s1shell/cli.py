@@ -16,7 +16,7 @@ from s1shell.assess.diff import diff_assessments
 from s1shell.assess.remediate import SUPPORTED_STACKS, generate_remediation_from_file
 from s1shell.assess.scorer import SUPPORTED_PRESETS, check_policy_gate
 from s1shell.assess.service import AssessService
-from s1shell.audit import AuditLogger
+from s1shell.audit import AuditEvent, AuditLogger
 from s1shell.codec.codecs import SUPPORTED_DECODERS, SUPPORTED_ENCODERS
 from s1shell.codec.service import CodecService
 from s1shell.completion import generate_completion
@@ -67,11 +67,14 @@ from s1shell.output import (
     render_scope_check,
     render_scope_entries,
     render_scope_import,
+    render_tor_check,
+    render_tor_status,
     write_or_print,
 )
 from s1shell.profile.service import ProfileService
 from s1shell.report.service import ReportService
 from s1shell.scope import ScopeManager, parse_expiry
+from s1shell.tor import probe_local_tor_port, validate_tor_proxy_url, verify_tor_egress
 
 _SEV_RANK = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
 
@@ -121,6 +124,29 @@ def _shared_flags_parser() -> argparse.ArgumentParser:
         type=Path,
         default=argparse.SUPPRESS,
         help="Override S1shell state directory (default: ~/.s1shell or S1SHELL_HOME).",
+    )
+    common.add_argument(
+        "--tor",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help=(
+            "Route passive OSINT, CVE, SBOM, cloud AI, and authorized .onion traffic via "
+            "local Tor SOCKS5h (fail-closed; zero DNS leaks)."
+        ),
+    )
+    common.add_argument(
+        "--tor-targets",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help=(
+            "With `--tor`, also route authorized clearnet target URL/domain checks "
+            "(DoH DNS, SOCKS5h TLS, single-GET HTTP) through Tor (zero IP/DNS leak)."
+        ),
+    )
+    common.add_argument(
+        "--tor-proxy",
+        default=argparse.SUPPRESS,
+        help="Custom local loopback Tor SOCKS5h URL (default: socks5h://127.0.0.1:9050).",
     )
     return common
 
@@ -1103,6 +1129,24 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional Bearer token (falls back to S1SHELL_MCP_TOKEN).",
     )
 
+    # --- tor ---
+    tor_p = modules.add_parser(
+        "tor",
+        parents=[common],
+        help="Check local Tor SOCKS5h readiness (`status`) or verify live Tor exit (`check`).",
+    )
+    tor_cmds = tor_p.add_subparsers(dest="command", required=True)
+    tor_cmds.add_parser(
+        "status",
+        parents=[common],
+        help="Offline local check for Tor binary, socksio, and loopback SOCKS5h port.",
+    )
+    tor_cmds.add_parser(
+        "check",
+        parents=[common],
+        help="Verify live Tor exit egress via check.torproject.org over SOCKS5h (fail-closed).",
+    )
+
     return parser
 
 
@@ -1128,16 +1172,37 @@ def dispatch(
 ) -> int:
     """Execute a parsed CLI command and return an ExitCode int."""
     err_stream = stderr if stderr is not None else sys.stderr
+    tor_flag = _opt(args, "tor")
+    tor_targets_flag = _opt(args, "tor_targets")
+    tor_proxy_arg = _opt(args, "tor_proxy")
     cfg = RuntimeConfig.from_env(
         home_override=_opt(args, "home"),
         scope_file_override=_opt(args, "scope_file"),
+        tor_enabled=True if tor_flag else None,
+        tor_targets=True if tor_targets_flag else None,
+        tor_proxy=str(tor_proxy_arg) if tor_proxy_arg else None,
     )
+    if cfg.tor_targets and not cfg.tor_enabled:
+        raise ValidationError("`--tor-targets` requires `--tor` (or S1SHELL_TOR=1).")
+    if cfg.tor_enabled:
+        validate_tor_proxy_url(cfg.tor_proxy)
+
     no_color = bool(_opt(args, "no_color", False))
     out_file: Path | None = _opt(args, "out")
     authorized = bool(_opt(args, "authorized", False))
     console = make_console(no_color=no_color, file=stdout)
 
-    scope_mgr = scope_manager if scope_manager is not None else ScopeManager(cfg.scope_file)
+    scope_mgr = (
+        scope_manager
+        if scope_manager is not None
+        else ScopeManager(
+            cfg.scope_file,
+            tor_enabled=cfg.tor_enabled,
+            tor_targets=cfg.tor_targets,
+            tor_proxy=cfg.tor_proxy,
+            tor_doh_url=cfg.tor_doh_url,
+        )
+    )
     audit_log = AuditLogger(cfg.audit_log)
 
     if args.module == "scope":
@@ -1801,6 +1866,45 @@ def dispatch(
             tok = args.token or os.environ.get("S1SHELL_MCP_TOKEN") or None
             ping_res = ping_mcp_http(args.url, token=tok, timeout=cfg.timeout_seconds)
             render_mcp_ping(ping_res, fmt=fmt, console=console, out_file=out_file, stdout=stdout)
+            return int(ExitCode.SUCCESS)
+
+    if args.module == "tor":
+        fmt = str(_opt(args, "fmt", "table"))
+        if args.command == "status":
+            t_stat = probe_local_tor_port(cfg.tor_proxy)
+            render_tor_status(t_stat, fmt=fmt, console=console, out_file=out_file, stdout=stdout)
+            return int(ExitCode.SUCCESS)
+        if args.command == "check":
+            import time as _time
+
+            t0 = _time.monotonic()
+            try:
+                t_chk = verify_tor_egress(cfg.tor_proxy, timeout=max(cfg.timeout_seconds, 15.0))
+            except S1ShellError as exc:
+                audit_log.log(
+                    AuditEvent.create(
+                        category="intel",
+                        command="tor_check",
+                        target="check.torproject.org",
+                        outcome="error",
+                        exit_code=int(exc.exit_code),
+                        duration_ms=int((_time.monotonic() - t0) * 1000),
+                        error=str(exc),
+                    )
+                )
+                raise
+            audit_log.log(
+                AuditEvent.create(
+                    category="intel",
+                    command="tor_check",
+                    target="check.torproject.org",
+                    resolved_ips=[t_chk.exit_ip] if t_chk.exit_ip else [],
+                    outcome="success",
+                    exit_code=int(ExitCode.SUCCESS),
+                    duration_ms=t_chk.latency_ms,
+                )
+            )
+            render_tor_check(t_chk, fmt=fmt, console=console, out_file=out_file, stdout=stdout)
             return int(ExitCode.SUCCESS)
 
     err_stream.write("Unknown command.\n")
