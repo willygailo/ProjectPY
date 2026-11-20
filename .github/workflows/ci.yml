@@ -67,5 +67,24 @@ jobs:
           /tmp/smoke-venv/bin/pip install dist/*.whl
           /tmp/smoke-venv/bin/s1shell --version
           /tmp/smoke-venv/bin/s1shell doctor --home /tmp/smoke-home
+          /tmp/smoke-venv/bin/s1shell ai skills list --format json > /dev/null
+          /tmp/smoke-venv/bin/s1shell mcp config http > /dev/null
+          /tmp/smoke-venv/bin/s1shell tor status --format json > /dev/null
           /tmp/smoke-venv/bin/s1shell completion bash > /dev/null
-          /tmp/smoke-venv/bin/s1shell fingerprint --from-profile tests/fixtures/sample_profile.json --format json > /dev/null
+          cat <<'EOF' > /tmp/smoke_profile.json
+          {
+            "schema_version": "1.0",
+            "tool_version": "0.4.2",
+            "generated_at_utc": "2026-11-20T00:00:00Z",
+            "artifact_type": "profile_report",
+            "target": "https://app.example.com",
+            "url": "https://app.example.com/",
+            "pinned_ip": "93.184.216.34",
+            "scope_id": "smoke001",
+            "auth_ref": "SMOKE-1",
+            "raw_headers": [["Server", "nginx/1.24.0"]],
+            "dns": {"a": ["93.184.216.34"], "aaaa": [], "cname": [], "errors": []},
+            "tls": {"applicable": true, "issuer": "CN=Let's Encrypt"}
+          }
+          EOF
+          /tmp/smoke-venv/bin/s1shell fingerprint --from-profile /tmp/smoke_profile.json --format json > /dev/null
