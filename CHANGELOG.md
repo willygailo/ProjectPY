@@ -2,6 +2,15 @@
 
 All notable changes to S1shell will be documented in this file.
 
+## [0.4.1] - 2026-11-20
+
+### Added — Offline Codec, Multi-Layer Auto-Decoder & Smart Artifact Inspector (`s1shell codec`)
+- **`s1shell codec decode`**: Offline decoder supporting `auto` (magic recursive peeling up to 12 layers with full trace), `base64`/`base64url`/`base32`/`base58`/`base85`/`ascii85`, `hex` (`0x`, spaces, colons, `\x`), `url`, `html`, `unicode`, `quoted-printable`, `rot13`, `caesar` (`--shift`, `--all-shifts` 1–25), `binary`, `octal`, `decimal`, `morse`, `punycode` (IDNA), `gzip`/`zlib`/`deflate` (with 8 MiB anti-zip-bomb cap), `saml` (URL/Base64/Deflate -> pretty XML), `jwt`, ordered `--chain` pipelines, stdin/`--file`/inline input, and `--raw` output.
+- **`s1shell codec encode`**: Single or chained encoding across 25 codecs including `hex-escaped`, `url-all`, `gzip-b64`, and `zlib-b64`.
+- **`s1shell codec inspect`**: Smart offline artifact analyzer identifying JWTs (with UTC timestamps & hygiene warnings), X.509 PEM/DER certificates (with SPKI pin & validity), cryptographic hash formats (`MD5`/`SHA-1`/`SHA-256`/`SHA-512`/`NTLM`/`bcrypt`/`Argon2`/`scrypt`/`PBKDF2`/`UUID`), Unix epoch timestamps, Shannon entropy, and nested encodings.
+- **`s1shell codec hash`**: Computes `MD5`, `SHA-1`, `SHA-256`, `SHA-384`, `SHA-512`, `BLAKE2b`, `CRC32`, and Shannon entropy for inline text, stdin, or local files.
+- **MCP & Shell Completions**: Added `s1shell_codec_decode`, `s1shell_codec_encode`, and `s1shell_codec_inspect` to `s1shell mcp serve` (`17` read-only MCP tools total) and updated Bash/Zsh/Fish completions.
+
 ## [0.4.0] - 2026-11-20
 
 ### Added — Deep Passive OSINT, Crypto/Email/Identity Profiling, & Supply-Chain v2

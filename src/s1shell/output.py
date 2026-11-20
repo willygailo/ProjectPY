@@ -18,6 +18,7 @@ from s1shell.assess.models import (
 )
 from s1shell.assess.service import build_report_bundle_from_assessment
 from s1shell.audit import AuditEvent, AuditVerifyResult
+from s1shell.codec.models import CodecHashResult, CodecInspectResult, CodecTransformResult
 from s1shell.config import RuntimeConfig
 from s1shell.cve.models import CVESearchResult, DependencyAuditResult
 from s1shell.doctor import DoctorReport
@@ -1421,4 +1422,231 @@ def render_rdap_lookup(
         )
     tbl.add_row("Abuse Contact", result.abuse_contact or "—")
     tbl.add_row("Cached", str(result.cached))
+    _emit_tables([tbl], console=console, out_file=out_file, stdout=stdout)
+
+
+def render_codec_transform(
+    result: CodecTransformResult,
+    *,
+    fmt: str,
+    console: Console,
+    out_file: Path | None = None,
+    stdout: TextIO | None = None,
+) -> None:
+    """Render `s1shell codec decode|encode` results in `table`, `json`, or `md`."""
+    norm = _require_format(fmt, ("table", "json", "md"), command=f"codec {result.operation}")
+    if norm == "json":
+        write_or_print(dumps_json(result), out_file=out_file, stdout=stdout)
+        return
+
+    chain_str = " -> ".join(s.codec for s in result.steps) or "none"
+    if norm == "md":
+        lines = [
+            f"# S1shell Codec {result.operation.title()} (`{chain_str}`)",
+            "",
+            (
+                f"- **Bytes:** `{result.byte_length}` | **UTF-8:** `{result.is_utf8}` | "
+                f"**Entropy:** `{result.entropy}` | **SHA-256:** `{result.sha256}`"
+            ),
+            "",
+            "## Pipeline Steps",
+            "",
+            "| Stage | Codec | In Bytes | Out Bytes | Note |",
+            "|---|---|---|---|---|",
+        ]
+        for s in result.steps:
+            lines.append(
+                f"| {s.stage} | `{s.codec}` | {s.input_bytes} | {s.output_bytes} | "
+                f"{_md_cell(s.note)} |"
+            )
+        lines.extend(["", "## Output", "", "```text", result.output_text, "```"])
+        if not result.is_utf8:
+            lines.extend(["", f"- **Hex:** `{result.output_hex[:256]}`"])
+        if result.variants:
+            lines.extend(["", "## Caesar Shift Candidates", "", "| Shift | Text |", "|---|---|"])
+            for v in result.variants:
+                lines.append(f"| -{v['shift']} | `{_md_cell(v['text'])}` |")
+        write_or_print("\n".join(lines), out_file=out_file, stdout=stdout)
+        return
+
+    tables: list[Table] = []
+    tbl = Table(title=f"Codec {result.operation.title()}: {chain_str}")
+    tbl.add_column("Field", style="cyan", no_wrap=True)
+    tbl.add_column("Value")
+    tbl.add_row("Pipeline", chain_str)
+    tbl.add_row(
+        "Metadata",
+        f"bytes={result.byte_length} | utf8={result.is_utf8} | entropy={result.entropy}",
+    )
+    tbl.add_row("SHA-256", result.sha256)
+    tbl.add_row("Output", result.output_text[:2000])
+    if not result.is_utf8:
+        tbl.add_row("Hex Preview", result.output_hex[:256])
+        tbl.add_row("Base64 Preview", result.output_base64[:256])
+    tables.append(tbl)
+
+    if len(result.steps) > 1:
+        stbl = Table(title="Decoding / Encoding Trace")
+        stbl.add_column("#", justify="right")
+        stbl.add_column("Codec", style="cyan")
+        stbl.add_column("Bytes")
+        stbl.add_column("Note")
+        for s in result.steps:
+            stbl.add_row(str(s.stage), s.codec, f"{s.input_bytes} -> {s.output_bytes}", s.note)
+        tables.append(stbl)
+
+    if result.variants:
+        vtbl = Table(title="Caesar Shift Candidates (1–25)")
+        vtbl.add_column("Shift", style="cyan", no_wrap=True)
+        vtbl.add_column("Decoded Candidate")
+        for v in result.variants:
+            vtbl.add_row(f"-{v['shift']}", v["text"][:160])
+        tables.append(vtbl)
+
+    _emit_tables(tables, console=console, out_file=out_file, stdout=stdout)
+
+
+def render_codec_inspect(
+    result: CodecInspectResult,
+    *,
+    fmt: str,
+    console: Console,
+    out_file: Path | None = None,
+    stdout: TextIO | None = None,
+) -> None:
+    """Render `s1shell codec inspect` smart artifact/token/cert/hash analysis."""
+    norm = _require_format(fmt, ("table", "json", "md"), command="codec inspect")
+    if norm == "json":
+        write_or_print(dumps_json(result), out_file=out_file, stdout=stdout)
+        return
+    if norm == "md":
+        lines = [
+            "# S1shell Offline Artifact Inspector",
+            "",
+            f"- **Detected:** `{', '.join(result.detected_types)}`",
+            (
+                f"- **Bytes:** `{result.byte_length}` | **Entropy:** `{result.entropy}` | "
+                f"**SHA-256:** `{result.sha256}`"
+            ),
+        ]
+        if result.timestamp_utc:
+            lines.append(f"- **Unix Epoch (UTC):** `{result.timestamp_utc}`")
+        if result.jwt:
+            lines.extend(
+                [
+                    "",
+                    "## JWT Details",
+                    "",
+                    f"- **Algorithm:** `{result.jwt.get('alg')}` | "
+                    f"**Signed:** `{result.jwt.get('signature_present')}`",
+                    f"- **Timestamps:** `{result.jwt.get('timestamps_utc')}`",
+                    f"- **Payload:** `{result.jwt.get('payload')}`",
+                ]
+            )
+        if result.x509:
+            lines.extend(
+                [
+                    "",
+                    "## X.509 Certificate",
+                    "",
+                    f"- **Subject:** `{result.x509.get('subject')}`",
+                    f"- **Issuer:** `{result.x509.get('issuer')}`",
+                    (
+                        f"- **Validity:** `{result.x509.get('not_before')}` -> "
+                        f"`{result.x509.get('not_after')}` ({result.x509.get('days_remaining')}d)"
+                    ),
+                    f"- **SPKI Pin:** `{result.x509.get('spki_sha256')}`",
+                ]
+            )
+        if result.hash_candidates:
+            lines.extend(["", "## Hash / ID Candidates", ""])
+            for cand in result.hash_candidates:
+                lines.append(f"- **{cand['format']}** (`{cand['strength']}`): {cand['note']}")
+        if result.auto_decoded:
+            chain_str = " -> ".join(s.codec for s in result.auto_decoded.steps)
+            lines.extend(
+                [
+                    "",
+                    f"## Auto-Decoded (`{chain_str}`)",
+                    "",
+                    "```text",
+                    result.auto_decoded.output_text,
+                    "```",
+                ]
+            )
+        if result.notes:
+            lines.extend(["", "## Notes & Warnings", ""])
+            for note in result.notes:
+                lines.append(f"- {note}")
+        write_or_print("\n".join(lines), out_file=out_file, stdout=stdout)
+        return
+
+    tbl = Table(title="S1shell Offline Artifact Inspector")
+    tbl.add_column("Field", style="cyan", no_wrap=True)
+    tbl.add_column("Value")
+    tbl.add_row("Detected", ", ".join(result.detected_types))
+    tbl.add_row("Bytes / Entropy", f"{result.byte_length} bytes | {result.entropy} bits/byte")
+    tbl.add_row("SHA-256", result.sha256)
+    if result.timestamp_utc:
+        tbl.add_row("Unix Epoch (UTC)", result.timestamp_utc)
+    if result.jwt:
+        tbl.add_row(
+            "JWT",
+            f"alg={result.jwt.get('alg')} | signed={result.jwt.get('signature_present')} | "
+            f"payload={result.jwt.get('payload')}",
+        )
+    if result.x509:
+        tbl.add_row(
+            "X.509 Cert",
+            f"subject={result.x509.get('subject')} | issuer={result.x509.get('issuer')} | "
+            f"days={result.x509.get('days_remaining')} | spki={result.x509.get('spki_sha256')}",
+        )
+    if result.hash_candidates:
+        tbl.add_row(
+            "Hash Candidates",
+            "; ".join(f"{c['format']} ({c['strength']})" for c in result.hash_candidates),
+        )
+    if result.auto_decoded:
+        chain_str = " -> ".join(s.codec for s in result.auto_decoded.steps)
+        tbl.add_row("Auto-Decode Chain", chain_str)
+        tbl.add_row("Decoded Output", result.auto_decoded.output_text[:1500])
+    if result.notes:
+        tbl.add_row("Notes", "\n".join(result.notes))
+    _emit_tables([tbl], console=console, out_file=out_file, stdout=stdout)
+
+
+def render_codec_hash(
+    result: CodecHashResult,
+    *,
+    fmt: str,
+    console: Console,
+    out_file: Path | None = None,
+    stdout: TextIO | None = None,
+) -> None:
+    """Render `s1shell codec hash` digests and entropy."""
+    norm = _require_format(fmt, ("table", "json", "md"), command="codec hash")
+    if norm == "json":
+        write_or_print(dumps_json(result), out_file=out_file, stdout=stdout)
+        return
+    if norm == "md":
+        lines = [
+            f"# S1shell Checksums (`{result.source}`)",
+            "",
+            f"- **Bytes:** `{result.byte_length}` | **Entropy:** `{result.entropy}`",
+            "",
+            "| Algorithm | Digest |",
+            "|---|---|",
+        ]
+        for algo, digest in result.hashes.items():
+            lines.append(f"| `{algo.upper()}` | `{digest}` |")
+        write_or_print("\n".join(lines), out_file=out_file, stdout=stdout)
+        return
+
+    tbl = Table(
+        title=f"Checksums: {result.source} ({result.byte_length} bytes, entropy={result.entropy})"
+    )
+    tbl.add_column("Algorithm", style="cyan", no_wrap=True)
+    tbl.add_column("Digest")
+    for algo, digest in result.hashes.items():
+        tbl.add_row(algo.upper(), digest)
     _emit_tables([tbl], console=console, out_file=out_file, stdout=stdout)

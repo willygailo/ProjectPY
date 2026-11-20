@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "s1shell"
-version = "0.4.0"
+version = "0.4.1"
 description = "Open-source CLI toolkit for authorized CVE research, scoped target profiling, passive fingerprinting, and reporting."
 readme = "README.md"
 license = { text = "MIT" }

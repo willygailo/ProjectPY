@@ -16,6 +16,8 @@ from s1shell.assess.remediate import SUPPORTED_STACKS, generate_remediation_from
 from s1shell.assess.scorer import SUPPORTED_PRESETS, check_policy_gate
 from s1shell.assess.service import AssessService
 from s1shell.audit import AuditLogger
+from s1shell.codec.codecs import SUPPORTED_DECODERS, SUPPORTED_ENCODERS
+from s1shell.codec.service import CodecService
 from s1shell.completion import generate_completion
 from s1shell.config import SUPPORTED_AI_PROVIDERS, RuntimeConfig
 from s1shell.cve.audit_deps import DependencyAuditService
@@ -36,6 +38,9 @@ from s1shell.output import (
     render_audit_events,
     render_audit_verify,
     render_batch_assessment,
+    render_codec_hash,
+    render_codec_inspect,
+    render_codec_transform,
     render_ct_lookup,
     render_cve_result,
     render_dependency_audit,
@@ -709,6 +714,126 @@ def build_parser() -> argparse.ArgumentParser:
     i_rdap.add_argument("--refresh", action="store_true", help="Bypass local cache.")
     i_rdap.add_argument("--offline", action="store_true", help="Read from local cache only.")
 
+    # --- codec ---
+    codec_p = modules.add_parser(
+        "codec",
+        parents=[common],
+        help="Offline decoder, encoder, smart token/cert/hash inspector, & checksums.",
+    )
+    codec_cmds = codec_p.add_subparsers(dest="command", required=True)
+
+    c_dec = codec_cmds.add_parser(
+        "decode",
+        parents=[common],
+        help="Decode Base64/Hex/URL/HTML/Unicode/SAML/JWT/Gzip/Auto (offline).",
+    )
+    c_dec.add_argument(
+        "input",
+        nargs="?",
+        default=None,
+        help="Text to decode, `-` for stdin, or omit when piping or using --file.",
+    )
+    c_dec.add_argument(
+        "-e",
+        "--encoding",
+        default="auto",
+        help=f"Decoder name (default: auto). Supported: {', '.join(SUPPORTED_DECODERS)}.",
+    )
+    c_dec.add_argument(
+        "--chain",
+        default=None,
+        help="Comma-separated ordered decoder pipeline (e.g. url,base64,gzip).",
+    )
+    c_dec.add_argument("--file", type=Path, default=None, help="Read raw bytes from FILE.")
+    c_dec.add_argument(
+        "--shift", type=int, default=13, help="Caesar cipher shift amount (default: 13)."
+    )
+    c_dec.add_argument(
+        "--all-shifts",
+        action="store_true",
+        help="With `-e caesar`, include all 25 shift candidates.",
+    )
+    c_dec.add_argument(
+        "--max-depth",
+        type=int,
+        default=6,
+        help="Max recursive layers for `-e auto` (1–12, default: 6).",
+    )
+    c_dec.add_argument(
+        "--raw",
+        action="store_true",
+        help="Print only the decoded text directly (ideal for shell piping).",
+    )
+
+    c_enc = codec_cmds.add_parser(
+        "encode",
+        parents=[common],
+        help="Encode text or files with a single codec or ordered --chain pipeline (offline).",
+    )
+    c_enc.add_argument(
+        "input",
+        nargs="?",
+        default=None,
+        help="Text to encode, `-` for stdin, or omit when piping or using --file.",
+    )
+    c_enc.add_argument(
+        "-e",
+        "--encoding",
+        default=None,
+        help=f"Encoder name. Supported: {', '.join(SUPPORTED_ENCODERS)}.",
+    )
+    c_enc.add_argument(
+        "--chain",
+        default=None,
+        help="Comma-separated ordered encoder pipeline (e.g. gzip,base64url).",
+    )
+    c_enc.add_argument("--file", type=Path, default=None, help="Read raw bytes from FILE.")
+    c_enc.add_argument(
+        "--shift", type=int, default=13, help="Caesar cipher shift amount (default: 13)."
+    )
+    c_enc.add_argument(
+        "--raw",
+        action="store_true",
+        help="Print only the encoded text directly (ideal for shell piping).",
+    )
+
+    c_ins = codec_cmds.add_parser(
+        "inspect",
+        parents=[common],
+        help="Smart offline inspector for JWT, X.509 PEM/DER, hashes, epochs, & nested encodings.",
+    )
+    c_ins.add_argument(
+        "input",
+        nargs="?",
+        default=None,
+        help="Artifact string to inspect, `-` for stdin, or omit when using --file.",
+    )
+    c_ins.add_argument("--file", type=Path, default=None, help="Read artifact bytes from FILE.")
+    c_ins.add_argument(
+        "--max-depth",
+        type=int,
+        default=6,
+        help="Max recursive layers for nested encoding detection (default: 6).",
+    )
+
+    c_hash = codec_cmds.add_parser(
+        "hash",
+        parents=[common],
+        help="Compute MD5/SHA-1/SHA-256/SHA-384/SHA-512/BLAKE2b/CRC32 & Shannon entropy.",
+    )
+    c_hash.add_argument(
+        "input",
+        nargs="?",
+        default=None,
+        help="Text to hash, `-` for stdin, or omit when using --file.",
+    )
+    c_hash.add_argument("--file", type=Path, default=None, help="Read raw bytes from FILE.")
+    c_hash.add_argument(
+        "--algos",
+        default=None,
+        help="Comma-separated algorithms (default: md5,sha1,sha256,sha384,sha512,blake2b,crc32).",
+    )
+
     # --- mcp ---
     mcp_p = modules.add_parser(
         "mcp",
@@ -741,6 +866,7 @@ def dispatch(
     report_service: ReportService | None = None,
     ai_service: AIService | None = None,
     assess_service: AssessService | None = None,
+    stdin: TextIO | None = None,
     stdout: TextIO | None = None,
     stderr: TextIO | None = None,
 ) -> int:
@@ -1250,6 +1376,69 @@ def dispatch(
                 refresh=bool(args.refresh),
             )
             render_rdap_lookup(rdap_res, fmt=fmt, console=console, out_file=out_file, stdout=stdout)
+            return int(ExitCode.SUCCESS)
+
+    if args.module == "codec":
+        fmt = str(_opt(args, "fmt", "table"))
+        c_svc = CodecService()
+        raw_stdin: bytes | None = None
+        if args.file is None and (args.input == "-" or args.input is None):
+            in_stream = stdin if stdin is not None else sys.stdin
+            if stdin is not None or not in_stream.isatty():
+                raw_text = in_stream.read()
+                if args.input == "-" or raw_text:
+                    raw_stdin = raw_text.encode("utf-8")
+        data, src_label = c_svc.read_input_bytes(
+            text=args.input,
+            file_path=args.file,
+            stdin_bytes=raw_stdin,
+        )
+        if args.command == "decode":
+            chain_list = (
+                [s.strip() for s in args.chain.split(",") if s.strip()] if args.chain else None
+            )
+            dec_res = c_svc.decode(
+                data,
+                encoding=args.encoding,
+                chain=chain_list,
+                shift=args.shift,
+                all_shifts=bool(args.all_shifts),
+                max_depth=args.max_depth,
+            )
+            if args.raw:
+                write_or_print(dec_res.output_text, out_file=out_file, stdout=stdout)
+            else:
+                render_codec_transform(
+                    dec_res, fmt=fmt, console=console, out_file=out_file, stdout=stdout
+                )
+            return int(ExitCode.SUCCESS)
+        if args.command == "encode":
+            chain_list = (
+                [s.strip() for s in args.chain.split(",") if s.strip()] if args.chain else None
+            )
+            enc_res = c_svc.encode(
+                data,
+                encoding=args.encoding,
+                chain=chain_list,
+                shift=args.shift,
+            )
+            if args.raw:
+                write_or_print(enc_res.output_text, out_file=out_file, stdout=stdout)
+            else:
+                render_codec_transform(
+                    enc_res, fmt=fmt, console=console, out_file=out_file, stdout=stdout
+                )
+            return int(ExitCode.SUCCESS)
+        if args.command == "inspect":
+            ins_res = c_svc.inspect(data, max_depth=args.max_depth)
+            render_codec_inspect(
+                ins_res, fmt=fmt, console=console, out_file=out_file, stdout=stdout
+            )
+            return int(ExitCode.SUCCESS)
+        if args.command == "hash":
+            algos = [a.strip() for a in args.algos.split(",") if a.strip()] if args.algos else None
+            h_res = c_svc.hash_data(data, source=src_label, algos=algos)
+            render_codec_hash(h_res, fmt=fmt, console=console, out_file=out_file, stdout=stdout)
             return int(ExitCode.SUCCESS)
 
     if args.module == "mcp" and args.command == "serve":

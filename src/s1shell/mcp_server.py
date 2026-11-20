@@ -11,6 +11,7 @@ from s1shell import __version__
 from s1shell.assess.diff import diff_assessments
 from s1shell.assess.remediate import generate_remediation_from_file
 from s1shell.audit import AuditLogger
+from s1shell.codec.service import CodecService
 from s1shell.config import RuntimeConfig
 from s1shell.cve.audit_deps import DependencyAuditService
 from s1shell.cve.models import CVESearchFilter
@@ -230,6 +231,55 @@ TOOLS_SPEC: list[dict[str, Any]] = [
             "required": ["indicator"],
         },
     },
+    {
+        "name": "s1shell_codec_decode",
+        "description": (
+            "Decode strings offline via auto-detect, explicit codec (base64, base64url, base32, "
+            "base58, hex, url, html, unicode, binary, octal, decimal, morse, punycode, rot13, "
+            "caesar, gzip, zlib, deflate, saml, jwt), or ordered chain."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string"},
+                "encoding": {"type": "string"},
+                "chain": {"type": "array", "items": {"type": "string"}},
+                "shift": {"type": "integer"},
+                "all_shifts": {"type": "boolean"},
+                "max_depth": {"type": "integer"},
+            },
+            "required": ["text"],
+        },
+    },
+    {
+        "name": "s1shell_codec_encode",
+        "description": "Encode text offline using a single codec or ordered chain.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string"},
+                "encoding": {"type": "string"},
+                "chain": {"type": "array", "items": {"type": "string"}},
+                "shift": {"type": "integer"},
+            },
+            "required": ["text"],
+        },
+    },
+    {
+        "name": "s1shell_codec_inspect",
+        "description": (
+            "Smart offline inspector identifying JWTs, X.509 PEM certificates, hash formats, "
+            "Unix timestamps, Shannon entropy, and nested encodings."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string"},
+                "max_depth": {"type": "integer"},
+            },
+            "required": ["text"],
+        },
+    },
 ]
 
 
@@ -276,6 +326,7 @@ class S1ShellMCPServer:
                 audit_logger=self.audit_logger,
             )
         )
+        self.codec_service = CodecService()
 
     def _call_tool(self, name: str, arguments: dict[str, Any]) -> str:
         if name == "s1shell_doctor":
@@ -359,6 +410,34 @@ class S1ShellMCPServer:
                 offline=bool(arguments.get("offline", False)),
             )
             return dumps_json(rdap_res)
+        if name == "s1shell_codec_decode":
+            raw_chain = arguments.get("chain")
+            chain_list = [str(c) for c in raw_chain] if isinstance(raw_chain, list) else None
+            dec_res = self.codec_service.decode(
+                str(arguments.get("text", "")).encode("utf-8"),
+                encoding=str(arguments.get("encoding") or "auto"),
+                chain=chain_list,
+                shift=int(arguments.get("shift", 13)),
+                all_shifts=bool(arguments.get("all_shifts", False)),
+                max_depth=int(arguments.get("max_depth", 6)),
+            )
+            return dumps_json(dec_res)
+        if name == "s1shell_codec_encode":
+            raw_chain = arguments.get("chain")
+            chain_list = [str(c) for c in raw_chain] if isinstance(raw_chain, list) else None
+            enc_res = self.codec_service.encode(
+                str(arguments.get("text", "")).encode("utf-8"),
+                encoding=arguments.get("encoding"),
+                chain=chain_list,
+                shift=int(arguments.get("shift", 13)),
+            )
+            return dumps_json(enc_res)
+        if name == "s1shell_codec_inspect":
+            ins_res = self.codec_service.inspect(
+                str(arguments.get("text", "")).encode("utf-8"),
+                max_depth=int(arguments.get("max_depth", 6)),
+            )
+            return dumps_json(ins_res)
         if name == "s1shell_audit_list":
             events = self.audit_logger.read_recent(
                 limit=int(arguments.get("limit", 50)),

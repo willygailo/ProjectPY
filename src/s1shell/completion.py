@@ -5,7 +5,7 @@ from __future__ import annotations
 from s1shell.errors import ValidationError
 
 _MODULES = (
-    "scope cve intel profile fingerprint report audit doctor completion ai assess diff "
+    "scope cve intel codec profile fingerprint report audit doctor completion ai assess diff "
     "remediate mcp"
 )
 _COMMON_FLAGS = "--format --out --verbose --no-color --authorized --scope-file --home --help"
@@ -38,9 +38,12 @@ _INTEL_FLAGS = (
     f"--export-candidates --refresh --offline {_COMMON_FLAGS}"
 )
 _REMEDIATE_FLAGS = f"--stack {_COMMON_FLAGS}"
+_CODEC_FLAGS = (
+    f"--encoding -e --chain --file --shift --all-shifts --max-depth --raw --algos {_COMMON_FLAGS}"
+)
 _FILE_FLAGS = (
     "--out|--scope-file|--from-profile|--from-fingerprint|--input|"
-    "--profile|--fingerprint|--cve|--env-file|--targets-file|--export-candidates"
+    "--profile|--fingerprint|--cve|--env-file|--targets-file|--export-candidates|--file"
 )
 
 _BASH_COMPLETION = f"""# bash completion for s1shell
@@ -155,6 +158,13 @@ _s1shell_completions() {{
                 COMPREPLY=( $(compgen -W "{_INTEL_FLAGS}" -- "${{cur}}") )
             fi
             ;;
+        codec)
+            if [[ ${{COMP_CWORD}} -eq 2 ]]; then
+                COMPREPLY=( $(compgen -W "decode encode inspect hash" -- "${{cur}}") )
+            else
+                COMPREPLY=( $(compgen -W "{_CODEC_FLAGS}" -- "${{cur}}") )
+            fi
+            ;;
         mcp)
             if [[ ${{COMP_CWORD}} -eq 2 ]]; then
                 COMPREPLY=( $(compgen -W "serve" -- "${{cur}}") )
@@ -179,6 +189,7 @@ _s1shell() {
         'scope:Manage authorized target scope, exclusions, and bulk imports'
         'cve:Research CVEs via NVD, CVE.org, OSV.dev, CISA KEV, and FIRST EPSS'
         'intel:Passive threat intel (VirusTotal, GreyNoise, urlscan.io, GitHub GHSA)'
+        'codec:Offline decoder, encoder, smart token/cert/hash inspector, and checksums'
         'profile:Read-only DNS/TLS/HTTP/HTML profiling'
         'fingerprint:Passive software, CDN, WAF, and JS library identification'
         'report:Compile CVE, profile, fingerprint, and assess reports'
@@ -272,6 +283,16 @@ _s1shell() {
                     )
                     _describe 'intel command' subcmds
                     ;;
+                codec)
+                    local -a subcmds
+                    subcmds=(
+                        'decode:Decode Base64/Hex/URL/HTML/Unicode/SAML/JWT/Gzip/Auto'
+                        'encode:Encode text or files using single or chained codecs'
+                        'inspect:Smart offline JWT/X.509/hash/timestamp/auto-decode inspector'
+                        'hash:Compute MD5/SHA-1/SHA-256/SHA-512/BLAKE2b/CRC32 and entropy'
+                    )
+                    _describe 'codec command' subcmds
+                    ;;
             esac
             ;;
     esac
@@ -285,6 +306,7 @@ complete -c s1shell -f
 complete -c s1shell -n "__fish_use_subcommand" -a "scope" -d "Manage authorized target scope"
 complete -c s1shell -n "__fish_use_subcommand" -a "cve" -d "CVE & SBOM intelligence (NVD/OSV)"
 complete -c s1shell -n "__fish_use_subcommand" -a "intel" -d "Passive VT/GreyNoise/urlscan/GHSA"
+complete -c s1shell -n "__fish_use_subcommand" -a "codec" -d "Offline decode/encode/inspect/hash"
 complete -c s1shell -n "__fish_use_subcommand" -a "profile" -d "Read-only target profiling"
 complete -c s1shell -n "__fish_use_subcommand" -a "fingerprint" -d "Passive stack matching"
 complete -c s1shell -n "__fish_use_subcommand" -a "report" -d "Compile assessment reports"
@@ -305,6 +327,7 @@ complete -c s1shell -n "__fish_seen_subcommand_from completion" -a "bash zsh fis
 complete -c s1shell -n "__fish_seen_subcommand_from ai" -a "env analyze"
 complete -c s1shell -n "__fish_seen_subcommand_from mcp" -a "serve"
 complete -c s1shell -n "__fish_seen_subcommand_from intel" -a "env lookup advisory ct rdap"
+complete -c s1shell -n "__fish_seen_subcommand_from codec" -a "decode encode inspect hash"
 
 complete -c s1shell -l format -x -a "table json md html sarif"
 complete -c s1shell -l preset -x -a "web api strict"
