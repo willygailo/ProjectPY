@@ -335,7 +335,9 @@ def _single_handshake(
             ctx.minimum_version = tls_version
             ctx.maximum_version = tls_version
 
-    server_hostname = None if is_ip else host
+    # Python's ssl module validates IP SANs when `server_hostname` is an IP literal and
+    # omits the RFC 6066 SNI extension automatically; passing None with check_hostname=True raises.
+    server_hostname = host if (verify or not is_ip) else None
     raw_sock = (
         open_socks5h_socket(tor_proxy, target_host=host, target_port=port, timeout=timeout)
         if tor_proxy is not None

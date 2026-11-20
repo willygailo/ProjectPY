@@ -28,6 +28,10 @@ All notable changes to S1shell will be documented in this file.
   - Added opt-in `--tor --tor-targets --authorized` zero-leak routing for authorized public target URLs/domains using a pure-Python RFC 1928 SOCKS5h tunnel (`ATYP 0x03`) for full TLS/X.509/ALPN handshakes, Tor-tunneled DNS-over-HTTPS (`TorDoHResolver`) for scope anti-SSRF validation and DNS hygiene, and `socks5h://` single-GET HTTP/well-known/`OPTIONS` fetches — enabling **Direct vs Tor perspective diffs** (`s1shell diff`) while strictly forbidding private/CGNAT targets, silent clearnet fallback, and IP rotation (`NEWNYM`).
   - Added strict RFC 7686 **Tor v3 `.onion`** scope support (`type: "onion"`, 56-char base32; rejects deprecated v2 `.onion`, zero local DNS queries), `s1shell tor status|check`, `tor_proxy` check in `s1shell doctor`, and `s1shell_tor_status` in `s1shell mcp serve` (`23` default / `26` scoped tools).
 
+### Fixed
+- **HTTPS IP-Literal TLS Handshake (`profile/tls_check.py`)**: Fixed `ValueError: check_hostname requires server_hostname` when profiling HTTPS IP targets (e.g. `https://1.1.1.1` or `https://127.0.0.1`) by passing the IP literal as `server_hostname` during verified TLS handshakes so Python's `ssl` validates IP SANs cleanly.
+- **Scope Table Rendering (`output.py`)**: Prevented Rich 80-column table truncation on `s1shell scope list` when long v3 `.onion` or URL-prefix entries are present (`min_width=16, overflow="fold"`).
+
 ## [0.4.2] - 2026-11-20
 
 ### Security & Reliability Hardening
