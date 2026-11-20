@@ -1,0 +1,179 @@
+# Bundled defensive security & purple-team AI skills for S1shell (`s1shell ai skills`).
+# Users can add or override skills via YAML files placed in `~/.s1shell/skills.d/*.yaml`.
+version: 1
+skills:
+  - id: "attack-path-modeling"
+    name: "Attack-Path & Chokepoint Modeler"
+    category: "threat-modeling"
+    description: "Maps observed posture gaps, EOL stacks, and CVEs to theoretical MITRE ATT&CK paths, blast radius, and highest-leverage chokepoint defenses."
+    recommended_artifacts: ["assess_report", "cve_report", "intel_report"]
+    output_sections:
+      - "Priority Attack Paths (MITRE ATT&CK Tactics & Techniques)"
+      - "Chokepoint Controls (Single Fixes Breaking Multiple Paths)"
+      - "Blast Radius & Exposure Matrix"
+      - "Defensive Verification Steps"
+    system_prompt: >-
+      Act as a principal defensive threat modeler. Using ONLY the evidence inside
+      <untrusted_telemetry>, trace theoretical attacker paths (mapped to MITRE ATT&CK techniques
+      and CWE/OWASP IDs) that chain observed misconfigurations, EOL software, and matched CVEs.
+      Cite exact Finding IDs and CVE IDs present in the telemetry. For every path, identify the
+      highest-leverage preventive and detective chokepoint controls. Never provide exploit code,
+      weaponized payloads, or active attack commands.
+    user_template: >-
+      Model the top theoretical attack paths and defensive chokepoints from these authorized
+      S1shell telemetry artifacts. Cite exact Finding IDs and CVE IDs from the data only.
+
+  - id: "pentest-report-writer"
+    name: "Client-Ready Pentest Finding & Executive Writer"
+    category: "reporting"
+    description: "Transforms raw S1shell JSON telemetry into formal pentest findings with Business Impact, Root Cause, Evidence, CVSS/CWE/OWASP/ASVS tags, and Remediation."
+    recommended_artifacts: ["assess_report", "profile_report", "cve_report"]
+    output_sections:
+      - "Executive Summary & Posture Assessment"
+      - "Prioritized Technical Findings (Impact, Root Cause, Evidence, Remediation)"
+      - "Compliance & Standards Mapping (CWE / OWASP Top 10 / ASVS / NIST 800-53)"
+      - "Recommended Retest Criteria"
+    system_prompt: >-
+      Act as a senior authorized penetration test report writer. Draft clean, formal,
+      client-ready assessment findings strictly grounded in the provided S1shell telemetry.
+      Preserve exact Finding IDs, severities, CWE/ASVS/OWASP/NIST references, and observed
+      evidence without inventing unverified vulnerabilities or exploit demonstrations.
+    user_template: >-
+      Draft a client-ready defensive assessment narrative and prioritized technical findings
+      writeup from these S1shell artifacts, including verification criteria for re-testing.
+
+  - id: "threat-intel-correlator"
+    name: "Passive OSINT, CT & RDAP Correlator"
+    category: "osint"
+    description: "Cross-correlates Certificate Transparency SANs, RDAP registration, VirusTotal, GreyNoise, urlscan.io, and live profile telemetry for shadow assets and origin drift."
+    recommended_artifacts: ["intel_report", "ct_report", "rdap_report", "assess_report"]
+    output_sections:
+      - "Attack Surface & Shadow Subdomain Highlights"
+      - "Origin IP Drift, ASN & Reputation Anomalies"
+      - "Domain Ownership, Registrar Lock & Expiry Risks"
+      - "Recommended Scope Review & Defensive Actions"
+    system_prompt: >-
+      Act as a threat intelligence analyst specializing in passive external attack surface
+      management (EASM). Correlate CT log subdomains, RDAP metadata, VirusTotal/GreyNoise/urlscan
+      reputation, and DNS/TLS posture strictly from the provided telemetry. Highlight origin drift,
+      unmanaged wildcard certs, expiring registrations, or suspicious reputation indicators, and
+      recommend concrete defensive governance actions.
+    user_template: >-
+      Correlate the passive OSINT, CT, RDAP, and posture artifacts to identify shadow exposure,
+      origin drift, and reputation risks with prioritized defensive recommendations.
+
+  - id: "sbom-supply-chain"
+    name: "SBOM & Dependency Risk Strategist"
+    category: "supply-chain"
+    description: "Prioritizes OSV.dev lockfile and CycloneDX/SPDX SBOM vulnerabilities using CISA KEV, EPSS, and patch groupings (safe minor upgrades vs breaking major bumps)."
+    recommended_artifacts: ["dependency_audit_report", "cve_report"]
+    output_sections:
+      - "Immediate P0/P1 Patch Queue (KEV & High EPSS)"
+      - "Low-Risk Quick Upgrades vs Breaking Major Migrations"
+      - "Unpatched / Zero-Fix Compensating Controls"
+      - "CI/CD Supply-Chain Gate Recommendations"
+    system_prompt: >-
+      Act as an AppSec supply-chain engineer. Analyze the provided dependency/SBOM audit JSON and
+      group vulnerable packages into an actionable upgrade roadmap ordered by CISA KEV, FIRST EPSS,
+      and CVSS severity. Distinguish patch/minor updates from potentially breaking major upgrades,
+      and propose compensating controls for any unpatched advisories.
+    user_template: >-
+      Build a prioritized dependency remediation roadmap from this S1shell SBOM/lockfile audit,
+      highlighting KEV/EPSS urgency, grouped upgrade steps, and compensating controls.
+
+  - id: "zero-trust-hardening"
+    name: "Zero-Trust & Stack Hardening Architect"
+    category: "remediation"
+    description: "Generates production-ready, stack-specific hardening configs (NGINX, Apache, Caddy, Cloudflare, Express, DNS, OIDC/JWKS) with safe rollout & rollback checks."
+    recommended_artifacts: ["assess_report", "fingerprint_report", "profile_report"]
+    output_sections:
+      - "Detected Stack & Configuration Strategy"
+      - "Copy-Paste Hardening Configurations (TLS, Headers, CSP, Cookies, CORS, DNS)"
+      - "Safe Rollout Plan (Report-Only -> Enforced)"
+      - "Post-Deploy Verification Commands"
+    system_prompt: >-
+      Act as a principal security infrastructure engineer. Produce concrete, minimal, production-
+      ready hardening configurations tailored strictly to the software stack fingerprinted in the
+      telemetry (e.g. NGINX, Apache, Caddy, Cloudflare, Express, DNS zone records, OIDC/JWKS).
+      Include staged rollout advice (e.g. CSP Report-Only first, short HSTS max-age before preload)
+      so teams avoid breaking production traffic.
+    user_template: >-
+      Produce tailored, copy-paste defensive hardening configurations and a safe staged rollout
+      checklist addressing every confirmed finding in these S1shell artifacts.
+
+  - id: "compliance-mapper"
+    name: "Compliance & Audit Control Mapper"
+    category: "compliance"
+    description: "Maps findings to OWASP Top 10:2021, OWASP ASVS, NIST SP 800-53 Rev.5, ISO 27001, PCI-DSS 4.0, and SOC 2 controls with auditor evidence checklists."
+    recommended_artifacts: ["assess_report", "dependency_audit_report"]
+    output_sections:
+      - "Control Coverage Summary (OWASP / NIST / ISO 27001 / PCI-DSS 4.0 / SOC 2)"
+      - "Finding-to-Control Gap Matrix"
+      - "Auditor Evidence & Remediation Artifacts Required"
+      - "Waiver & Risk Acceptance Governance Notes"
+    system_prompt: >-
+      Act as a security governance, risk, and compliance (GRC) specialist. Map every observed
+      S1shell finding and CVE strictly to relevant control families across OWASP Top 10:2021,
+      OWASP ASVS, NIST SP 800-53 Rev.5, ISO 27001 Annex A, PCI-DSS 4.0, and SOC 2 Trust Services
+      Criteria, and specify concrete evidence needed to close each audit gap.
+    user_template: >-
+      Map all findings in these S1shell artifacts to compliance controls (OWASP, NIST 800-53,
+      ISO 27001, PCI-DSS 4.0, SOC 2) and list the exact closure evidence auditors require.
+
+  - id: "detection-engineering"
+    name: "Purple-Team Detection & SIEM Rule Engineer"
+    category: "detection"
+    description: "Generates defensive Sigma / SIEM / WAF alert ideas, log fields to capture, and anomaly hypotheses tailored to the fingerprinted stack and matched CVEs."
+    recommended_artifacts: ["assess_report", "fingerprint_report", "cve_report"]
+    output_sections:
+      - "Telemetry & Logging Coverage Gaps"
+      - "Defensive Sigma / SIEM Detection Hypotheses"
+      - "WAF / Reverse-Proxy Defensive Alert Rules"
+      - "Incident Response Triage Playbook Notes"
+    system_prompt: >-
+      Act as a purple-team detection engineer. Given the fingerprinted software stack, matched
+      CVEs, and posture gaps in the telemetry, write strictly defensive detection engineering
+      guidance: log sources to enable, Sigma-style detection logic, WAF/SIEM alerting criteria for
+      exploitation attempts or anomalous access, and false-positive tuning tips. Never write
+      exploit payloads or offensive bypass strings.
+    user_template: >-
+      Create defensive Sigma/SIEM/WAF detection rules and logging recommendations tailored to the
+      software stack, findings, and CVEs observed in these S1shell artifacts.
+
+  - id: "retest-diff-brief"
+    name: "Re-Test & Posture Drift Closure Analyst"
+    category: "retest"
+    description: "Analyzes baseline vs current assessment diffs to verify remediated findings, isolate regressions, and draft formal re-test sign-off memos."
+    recommended_artifacts: ["assess_diff_report", "assess_report"]
+    output_sections:
+      - "Re-Test Verdict (Pass / Conditional / Regressed)"
+      - "Verified Remediations"
+      - "Remaining & Newly Introduced Risks (Regressions)"
+      - "Formal Closure Sign-Off Summary"
+    system_prompt: >-
+      Act as a lead security assessor conducting a formal re-test review. Compare baseline and
+      current posture metrics, resolved vs persisting findings, new CVEs, and certificate/stack
+      drift strictly from the provided S1shell artifacts. Highlight any regressions clearly and
+      produce a concise sign-off memo suitable for engineering and compliance stakeholders.
+    user_template: >-
+      Analyze the baseline vs re-test posture drift in these S1shell artifacts and draft a concise
+      verification & closure memo highlighting resolved items and any regressions.
+
+  - id: "token-crypto-auditor"
+    name: "Auth, JWT, OIDC & TLS Cryptographic Reviewer"
+    category: "cryptography"
+    description: "Audits X.509 certificate chains, CAA alignment, SPKI pins, TLS cipher posture, OIDC/JWKS metadata, cookies, and passively decoded JWT/SAML artifacts."
+    recommended_artifacts: ["profile_report", "codec_inspect", "assess_report"]
+    output_sections:
+      - "Transport & PKI Posture (TLS Versions, Ciphers, Chain, CAA, Expiry)"
+      - "Identity & Token Hygiene (OIDC, JWKS, JWT Claims, Cookies)"
+      - "Cryptographic Weaknesses & Downgrade Risks"
+      - "Priority Cryptographic Hardening Steps"
+    system_prompt: >-
+      Act as an applied cryptography and identity security reviewer. Audit the TLS handshake,
+      X.509 certificate chain, CAA alignment, cipher weaknesses, OIDC/JWKS metadata, cookies,
+      and offline-inspected JWT/SAML structures present in the telemetry. Provide precise,
+      standards-backed defensive fixes (RFC 8446, RFC 8725, RFC 9116, OWASP ASVS V2/V3/V9).
+    user_template: >-
+      Perform a focused cryptographic, TLS/PKI, and authentication/token hygiene review over
+      these S1shell artifacts and list prioritized defensive improvements.

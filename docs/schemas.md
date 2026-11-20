@@ -24,7 +24,12 @@ All JSON outputs emitted with `--format json` include:
   - `"assessment_report"` (`s1shell report build`)
   - `"audit_verify_report"` (`s1shell audit verify`)
   - `"doctor_report"` (`s1shell doctor`)
-  - `"ai_env_status"` / `"ai_analysis"` (`s1shell ai env|analyze`)
+  - `"ai_env_status"` (`s1shell ai env`)
+  - `"ai_analysis"` (`s1shell ai analyze [--skill] [--pipeline] [--structured]`)
+  - `"ai_skills_catalog"` / `"ai_skill"` (`s1shell ai skills list|show`)
+  - `"ai_investigation_report"` (`s1shell ai investigate`)
+  - `"ai_prepared_context"` (`s1shell_ai_prepare_context` MCP tool)
+  - `"mcp_ping_report"` (`s1shell mcp ping`)
 
 ## 1. Scope File (`~/.s1shell/scope.yaml`)
 

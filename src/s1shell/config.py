@@ -309,6 +309,11 @@ class RuntimeConfig:
         return self.home_dir / "signatures.d"
 
     @property
+    def skills_dir(self) -> Path:
+        """Optional directory for user-supplied defensive AI skill YAML files."""
+        return self.home_dir / "skills.d"
+
+    @property
     def user_agent(self) -> str:
         """Standard honest User-Agent required on every outbound HTTP request."""
         return f"S1shell/{__version__} (authorized assessment; +{self.project_url})"

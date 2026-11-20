@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from s1shell import __version__
+from s1shell.ai.skills import load_skills
 from s1shell.audit import AuditLogger
 from s1shell.config import RuntimeConfig, classify_anthropic_key, mask_api_key
 from s1shell.cve.cache import CVECache
@@ -265,6 +266,24 @@ def run_doctor(cfg: RuntimeConfig) -> DoctorReport:
             ),
         )
     )
+
+    try:
+        bundled_skills = load_skills()
+        all_skills = load_skills(extra_dir=cfg.skills_dir)
+        custom_skills = sum(1 for s in all_skills if s.source != "bundled")
+        skill_note = f" (+{custom_skills} custom in {cfg.skills_dir})" if custom_skills else ""
+        checks.append(
+            DoctorCheck(
+                name="ai_skills",
+                status="ok" if all_skills else "warn",
+                detail=(
+                    f"Loaded {len(all_skills)} defensive AI skills "
+                    f"({len(bundled_skills)} bundled{skill_note})"
+                ),
+            )
+        )
+    except Exception as exc:  # noqa: BLE001
+        checks.append(DoctorCheck(name="ai_skills", status="error", detail=str(exc)))
 
     healthy = all(c.status != "error" for c in checks)
     return DoctorReport(home_dir=str(cfg.home_dir), checks=checks, healthy=healthy)

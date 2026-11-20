@@ -10,6 +10,7 @@ from typing import Any, TextIO
 
 from s1shell import __version__
 from s1shell.ai.client import SUPPORTED_AI_MODES
+from s1shell.ai.pipelines import SUPPORTED_AI_PIPELINES
 from s1shell.ai.service import AIService
 from s1shell.assess.diff import diff_assessments
 from s1shell.assess.remediate import SUPPORTED_STACKS, generate_remediation_from_file
@@ -27,12 +28,22 @@ from s1shell.doctor import run_doctor
 from s1shell.errors import ExitCode, PolicyGateError, S1ShellError, ValidationError
 from s1shell.fingerprint.service import FingerprintService
 from s1shell.intel.service import SUPPORTED_INTEL_SOURCES, IntelService
-from s1shell.mcp_server import S1ShellMCPServer
-from s1shell.models import utc_now
+from s1shell.mcp_server import (
+    DEFAULT_MCP_HOST,
+    DEFAULT_MCP_PORT,
+    SUPPORTED_MCP_CLIENTS,
+    S1ShellMCPServer,
+    build_mcp_client_config,
+    ping_mcp_http,
+)
+from s1shell.models import dumps_json, utc_now
 from s1shell.output import (
     make_console,
     render_ai_analysis,
     render_ai_env_status,
+    render_ai_investigation,
+    render_ai_skill_detail,
+    render_ai_skills_catalog,
     render_assessment_diff,
     render_assessment_result,
     render_audit_events,
@@ -49,6 +60,7 @@ from s1shell.output import (
     render_ghsa_advisories,
     render_intel_env,
     render_intel_lookup,
+    render_mcp_ping,
     render_profile_result,
     render_rdap_lookup,
     render_remediation_plan,
@@ -451,9 +463,56 @@ def build_parser() -> argparse.ArgumentParser:
         help="Defensive analysis style: triage, executive, or remediate (config snippets).",
     )
     ai_analyze.add_argument(
+        "--skill",
+        default=None,
+        help="Apply a curated defensive AI skill (see `s1shell ai skills list`).",
+    )
+    ai_analyze.add_argument(
+        "--pipeline",
+        choices=list(SUPPORTED_AI_PIPELINES),
+        default=None,
+        help="Run a multi-stage reasoning pipeline (deep-triage, purple-team, executive-pack).",
+    )
+    ai_analyze.add_argument(
+        "--structured",
+        action="store_true",
+        help="Enforce a validated JSON schema response with 1-shot automatic repair.",
+    )
+    ai_analyze.add_argument(
         "--redact",
         action="store_true",
-        help="Anonymize hostnames, IPs, scope IDs, and cookies before sending to AI.",
+        help="Anonymize hostnames, IPv4/IPv6, emails, scope IDs, auth headers & cookies.",
+    )
+    ai_analyze.add_argument(
+        "--restore",
+        action="store_true",
+        help="With --redact, restore placeholders back to local values after AI inference.",
+    )
+    ai_analyze.add_argument(
+        "--raw-context",
+        action="store_true",
+        help="Disable smart signal-first artifact distillation and pass raw JSON slices.",
+    )
+    ai_analyze.add_argument(
+        "--local-only",
+        action="store_true",
+        help="Air-gap guard: refuse any AI endpoint that is not localhost/loopback.",
+    )
+    ai_analyze.add_argument(
+        "--fallback",
+        choices=list(SUPPORTED_AI_PROVIDERS),
+        default=None,
+        help="Optional fallback AI provider if the primary endpoint fails.",
+    )
+    ai_analyze.add_argument(
+        "--cache",
+        action="store_true",
+        help="Cache single-shot AI responses locally in SQLite to avoid redundant token usage.",
+    )
+    ai_analyze.add_argument(
+        "--refresh",
+        action="store_true",
+        help="Bypass cached AI response when --cache is enabled.",
     )
     ai_analyze.add_argument(
         "--max-tokens",
@@ -461,6 +520,95 @@ def build_parser() -> argparse.ArgumentParser:
         default=1024,
         help="Maximum response tokens (default: 1024).",
     )
+
+    ai_skills = ai_cmds.add_parser(
+        "skills",
+        parents=[common],
+        help="List or inspect bundled and custom (~/.s1shell/skills.d) defensive AI skills.",
+    )
+    ai_skills_cmds = ai_skills.add_subparsers(dest="skills_cmd", required=True)
+    ai_skills_cmds.add_parser("list", parents=[common], help="List all available AI skills.")
+    ai_skill_show = ai_skills_cmds.add_parser(
+        "show", parents=[common], help="Show full prompt details for one AI skill."
+    )
+    ai_skill_show.add_argument("skill_id", help="Skill ID (e.g. attack-path-modeling).")
+
+    ai_inv = ai_cmds.add_parser(
+        "investigate",
+        parents=[common],
+        help="Run a bounded read-only ReAct AI investigation using offline/passive tools only.",
+    )
+    ai_inv.add_argument(
+        "--input",
+        dest="inputs",
+        action="append",
+        type=Path,
+        default=[],
+        help="S1shell JSON artifact or engagement directory (repeatable).",
+    )
+    ai_inv.add_argument(
+        "--goal",
+        required=True,
+        help="Defensive investigation goal (e.g. 'Prioritize KEV & origin exposure').",
+    )
+    ai_inv.add_argument(
+        "--max-steps",
+        type=int,
+        default=5,
+        help="Maximum bounded tool/reasoning steps (1–8, default: 5).",
+    )
+    ai_inv.add_argument(
+        "--provider",
+        choices=list(SUPPORTED_AI_PROVIDERS),
+        default=None,
+        help="Override active AI provider.",
+    )
+    ai_inv.add_argument("--base-url", default=None, help="Override AI endpoint URL.")
+    ai_inv.add_argument("--model", default=None, help="Override model ID.")
+    ai_inv.add_argument("--redact", action="store_true", help="Anonymize sensitive telemetry.")
+    ai_inv.add_argument("--restore", action="store_true", help="Restore redacted placeholders.")
+    ai_inv.add_argument(
+        "--local-only",
+        action="store_true",
+        help="Air-gap guard: refuse any non-loopback AI endpoint.",
+    )
+    ai_inv.add_argument(
+        "--max-tokens",
+        type=int,
+        default=1200,
+        help="Maximum response tokens per step (default: 1200).",
+    )
+
+    ai_chat = ai_cmds.add_parser(
+        "chat",
+        parents=[common],
+        help="Interactive multi-turn defensive AI copilot grounded on saved artifacts.",
+    )
+    ai_chat.add_argument(
+        "--input",
+        dest="inputs",
+        action="append",
+        type=Path,
+        default=[],
+        help="S1shell JSON artifact or engagement directory (repeatable).",
+    )
+    ai_chat.add_argument("--skill", default=None, help="Initial defensive skill ID.")
+    ai_chat.add_argument(
+        "--provider",
+        choices=list(SUPPORTED_AI_PROVIDERS),
+        default=None,
+        help="Override active AI provider.",
+    )
+    ai_chat.add_argument("--base-url", default=None, help="Override AI endpoint URL.")
+    ai_chat.add_argument("--model", default=None, help="Override model ID.")
+    ai_chat.add_argument("--redact", action="store_true", help="Anonymize sensitive telemetry.")
+    ai_chat.add_argument("--restore", action="store_true", help="Restore redacted placeholders.")
+    ai_chat.add_argument(
+        "--local-only",
+        action="store_true",
+        help="Air-gap guard: refuse any non-loopback AI endpoint.",
+    )
+    ai_chat.add_argument("--max-tokens", type=int, default=1024, help="Max tokens per reply.")
 
     # --- assess ---
     assess_p = modules.add_parser(
@@ -574,9 +722,30 @@ def build_parser() -> argparse.ArgumentParser:
         help="AI analysis mode when --ai is enabled (triage, executive, remediate).",
     )
     assess_p.add_argument(
+        "--ai-skill",
+        default=None,
+        help="Curated defensive AI skill to apply when --ai is enabled.",
+    )
+    assess_p.add_argument(
+        "--ai-pipeline",
+        choices=list(SUPPORTED_AI_PIPELINES),
+        default=None,
+        help="Multi-stage AI reasoning pipeline when --ai is enabled.",
+    )
+    assess_p.add_argument(
         "--redact",
         action="store_true",
         help="Redact sensitive hostnames/IPs/scope metadata before sending to cloud AI.",
+    )
+    assess_p.add_argument(
+        "--restore",
+        action="store_true",
+        help="Restore redacted placeholders locally after AI inference.",
+    )
+    assess_p.add_argument(
+        "--local-only",
+        action="store_true",
+        help="Air-gap guard: only permit localhost/loopback AI endpoints when --ai is set.",
     )
     assess_p.add_argument(
         "--fail-on",
@@ -838,13 +1007,100 @@ def build_parser() -> argparse.ArgumentParser:
     mcp_p = modules.add_parser(
         "mcp",
         parents=[common],
-        help="Run S1shell's strictly read-only offline/intel MCP server (stdio JSON-RPC 2.0).",
+        help="Run S1shell's online Streamable HTTP or local stdio read-only MCP server.",
     )
     mcp_cmds = mcp_p.add_subparsers(dest="command", required=True)
-    mcp_cmds.add_parser(
+    mcp_serve = mcp_cmds.add_parser(
         "serve",
         parents=[common],
-        help="Start read-only offline MCP server over stdin/stdout.",
+        help="Start read-only MCP server over local stdio or online Streamable HTTP.",
+    )
+    mcp_serve.add_argument(
+        "--transport",
+        choices=("stdio", "http"),
+        default="stdio",
+        help="MCP transport: local `stdio` (default) or online Streamable `http`.",
+    )
+    mcp_serve.add_argument(
+        "--host",
+        default=DEFAULT_MCP_HOST,
+        help=f"Bind address for `--transport http` (default: {DEFAULT_MCP_HOST}).",
+    )
+    mcp_serve.add_argument(
+        "--port",
+        type=int,
+        default=DEFAULT_MCP_PORT,
+        help=f"TCP port for `--transport http` (default: {DEFAULT_MCP_PORT}).",
+    )
+    mcp_serve.add_argument(
+        "--token",
+        default=None,
+        help="Bearer auth token for `--transport http` (or set S1SHELL_MCP_TOKEN).",
+    )
+    mcp_serve.add_argument(
+        "--generate-token",
+        action="store_true",
+        help="Auto-generate a random Bearer token on startup and print it to stderr.",
+    )
+    mcp_serve.add_argument(
+        "--allow-origin",
+        action="append",
+        default=[],
+        help="Allowlisted HTTP Origin URL for browser/web MCP clients (repeatable).",
+    )
+    mcp_serve.add_argument(
+        "--allow-scoped-targets",
+        action="store_true",
+        help=(
+            "Opt-in: expose fail-closed read-only target tools (`s1shell_profile`, "
+            "`s1shell_fingerprint`, `s1shell_assess`). Requires `--authorized`."
+        ),
+    )
+
+    mcp_cfg = mcp_cmds.add_parser(
+        "config",
+        parents=[common],
+        help="Generate ready-to-paste MCP client JSON config (HTTP or stdio).",
+    )
+    mcp_cfg.add_argument(
+        "client",
+        nargs="?",
+        default="http",
+        choices=SUPPORTED_MCP_CLIENTS,
+        help="Target MCP client preset (default: http).",
+    )
+    mcp_cfg.add_argument(
+        "--transport",
+        choices=("http", "stdio"),
+        default="http",
+        help="Config transport mode (default: http).",
+    )
+    mcp_cfg.add_argument(
+        "--url",
+        default=f"http://{DEFAULT_MCP_HOST}:{DEFAULT_MCP_PORT}/mcp",
+        help="Online MCP server URL for `--transport http`.",
+    )
+    mcp_cfg.add_argument("--token", default=None, help="Optional Bearer token to embed in config.")
+    mcp_cfg.add_argument(
+        "--allow-scoped-targets",
+        action="store_true",
+        help="Include `--allow-scoped-targets --authorized` in generated stdio args.",
+    )
+
+    mcp_ping = mcp_cmds.add_parser(
+        "ping",
+        parents=[common],
+        help="Verify connectivity & capabilities of a running online HTTP MCP server.",
+    )
+    mcp_ping.add_argument(
+        "--url",
+        default=f"http://{DEFAULT_MCP_HOST}:{DEFAULT_MCP_PORT}/mcp",
+        help="Running MCP Streamable HTTP endpoint URL.",
+    )
+    mcp_ping.add_argument(
+        "--token",
+        default=None,
+        help="Optional Bearer token (falls back to S1SHELL_MCP_TOKEN).",
     )
 
     return parser
@@ -1158,13 +1414,66 @@ def dispatch(
                 provider=args.provider,
                 base_url=args.base_url,
                 mode=args.mode,
+                skill=args.skill,
+                pipeline=args.pipeline,
+                structured=bool(args.structured),
                 redact=bool(args.redact),
+                restore=bool(args.restore),
+                compact=not bool(args.raw_context),
+                local_only=bool(args.local_only),
+                fallback_provider=args.fallback,
+                use_cache=bool(args.cache),
+                refresh_cache=bool(args.refresh),
                 max_tokens=args.max_tokens,
             )
             render_ai_analysis(
                 analysis_res, fmt=fmt, console=console, out_file=out_file, stdout=stdout
             )
             return int(ExitCode.SUCCESS)
+        if args.command == "skills":
+            if args.skills_cmd == "list":
+                cat = ai_svc.list_skills()
+                render_ai_skills_catalog(
+                    cat, fmt=fmt, console=console, out_file=out_file, stdout=stdout
+                )
+                return int(ExitCode.SUCCESS)
+            if args.skills_cmd == "show":
+                sk = ai_svc.get_skill(args.skill_id)
+                render_ai_skill_detail(
+                    sk, fmt=fmt, console=console, out_file=out_file, stdout=stdout
+                )
+                return int(ExitCode.SUCCESS)
+        if args.command == "investigate":
+            inv_res = ai_svc.investigate(
+                inputs=args.inputs,
+                goal=args.goal,
+                model=args.model,
+                provider=args.provider,
+                base_url=args.base_url,
+                max_steps=args.max_steps,
+                max_tokens=args.max_tokens,
+                redact=bool(args.redact),
+                restore=bool(args.restore),
+                local_only=bool(args.local_only),
+            )
+            render_ai_investigation(
+                inv_res, fmt=fmt, console=console, out_file=out_file, stdout=stdout
+            )
+            return int(ExitCode.SUCCESS)
+        if args.command == "chat":
+            return ai_svc.chat(
+                inputs=args.inputs,
+                skill=args.skill,
+                model=args.model,
+                provider=args.provider,
+                base_url=args.base_url,
+                redact=bool(args.redact),
+                restore=bool(args.restore),
+                local_only=bool(args.local_only),
+                max_tokens=args.max_tokens,
+                stdin=stdin,
+                stdout=stdout,
+            )
 
     if args.module == "assess":
         fmt = str(_opt(args, "fmt", "table"))
@@ -1205,7 +1514,11 @@ def dispatch(
                 run_ai=bool(args.ai),
                 ai_provider=args.ai_provider,
                 ai_mode=args.ai_mode,
+                ai_skill=args.ai_skill,
+                ai_pipeline=args.ai_pipeline,
                 ai_redact=bool(args.redact),
+                ai_restore=bool(args.restore),
+                ai_local_only=bool(args.local_only),
                 preset=args.preset,
                 ignore_findings=ignored or None,
                 include_remediation=not bool(args.no_remediate),
@@ -1262,7 +1575,11 @@ def dispatch(
             run_ai=bool(args.ai),
             ai_provider=args.ai_provider,
             ai_mode=args.ai_mode,
+            ai_skill=args.ai_skill,
+            ai_pipeline=args.ai_pipeline,
             ai_redact=bool(args.redact),
+            ai_restore=bool(args.restore),
+            ai_local_only=bool(args.local_only),
             preset=args.preset,
             ignore_findings=ignored or None,
             include_remediation=not bool(args.no_remediate),
@@ -1442,17 +1759,49 @@ def dispatch(
             render_codec_hash(h_res, fmt=fmt, console=console, out_file=out_file, stdout=stdout)
             return int(ExitCode.SUCCESS)
 
-    if args.module == "mcp" and args.command == "serve":
-        mcp_srv = S1ShellMCPServer(
-            cfg,
-            cve_service=cve_service,
-            dep_audit_service=dep_audit_service,
-            intel_service=intel_service,
-            fingerprint_service=fingerprint_service,
-            scope_manager=scope_mgr,
-            audit_logger=audit_log,
-        )
-        return mcp_srv.serve_stdio(stdout=stdout)
+    if args.module == "mcp":
+        fmt = str(_opt(args, "fmt", "table"))
+        if args.command == "serve":
+            mcp_srv = S1ShellMCPServer(
+                cfg,
+                cve_service=cve_service,
+                dep_audit_service=dep_audit_service,
+                intel_service=intel_service,
+                fingerprint_service=fingerprint_service,
+                profile_service=profile_service,
+                ai_service=ai_service,
+                scope_manager=scope_mgr,
+                audit_logger=audit_log,
+                allow_scoped_targets=bool(_opt(args, "allow_scoped_targets", False)),
+                authorized=authorized,
+            )
+            if _opt(args, "transport", "stdio") == "http":
+                return mcp_srv.serve_http(
+                    host=str(_opt(args, "host", DEFAULT_MCP_HOST)),
+                    port=int(_opt(args, "port", DEFAULT_MCP_PORT)),
+                    auth_token=_opt(args, "token"),
+                    generate_token=bool(_opt(args, "generate_token", False)),
+                    allowed_origins=list(_opt(args, "allow_origin", []) or []),
+                    stderr=err_stream,
+                )
+            return mcp_srv.serve_stdio(stdout=stdout)
+        if args.command == "config":
+            cfg_json = build_mcp_client_config(
+                args.client,
+                transport=args.transport,
+                url=args.url,
+                token=args.token,
+                allow_scoped_targets=bool(_opt(args, "allow_scoped_targets", False)),
+            )
+            write_or_print(dumps_json(cfg_json), out_file=out_file, stdout=stdout)
+            return int(ExitCode.SUCCESS)
+        if args.command == "ping":
+            import os
+
+            tok = args.token or os.environ.get("S1SHELL_MCP_TOKEN") or None
+            ping_res = ping_mcp_http(args.url, token=tok, timeout=cfg.timeout_seconds)
+            render_mcp_ping(ping_res, fmt=fmt, console=console, out_file=out_file, stdout=stdout)
+            return int(ExitCode.SUCCESS)
 
     err_stream.write("Unknown command.\n")
     return int(ExitCode.ERROR)

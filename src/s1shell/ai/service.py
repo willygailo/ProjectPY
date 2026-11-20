@@ -1,16 +1,42 @@
-"""AI module service for `.env` management, redaction, and multi-provider defensive triage."""
+"""AI module service: `.env`, skills, distillation, pipelines, grounding, ReAct & chat."""
 
 from __future__ import annotations
 
+import hashlib
 import json
+import re
+import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any, TextIO
 
 import httpx
 
-from s1shell.ai.client import build_ai_client, build_system_prompt
-from s1shell.ai.models import AIAnalysisResult, AIEnvStatus
+from s1shell.ai.client import AIClientProtocol, build_ai_client, build_system_prompt
+from s1shell.ai.distill import distill_artifact
+from s1shell.ai.guardrails import wrap_untrusted_telemetry
+from s1shell.ai.investigate import ReadOnlyToolExecutor, run_readonly_investigation
+from s1shell.ai.models import (
+    AIAnalysisResult,
+    AIEnvStatus,
+    AIInvestigationResult,
+    AIPipelineStageResult,
+)
+from s1shell.ai.pipelines import (
+    STRUCTURED_OUTPUT_INSTRUCTIONS,
+    get_pipeline_stages,
+    parse_structured_json,
+)
 from s1shell.ai.redact import TelemetryRedactor
+from s1shell.ai.skills import (
+    AISkill,
+    AISkillsCatalog,
+    build_skill_prompt_addendum,
+    get_skill,
+    load_skills,
+)
+from s1shell.ai.verify import extract_known_references, verify_analysis_grounding
 from s1shell.audit import AuditEvent, AuditLogger
 from s1shell.config import (
     SUPPORTED_AI_PROVIDERS,
@@ -20,9 +46,11 @@ from s1shell.config import (
     load_dotenv_file,
     mask_api_key,
 )
-from s1shell.errors import ExitCode, ValidationError
+from s1shell.cve.cache import CVECache
+from s1shell.errors import ExitCode, NetworkError, ValidationError
 
 _MAX_ARTIFACT_CHARS = 16_000
+_TELEMETRY_NONCE_RE = re.compile(r'id="t_[0-9a-f]+"')
 
 _PROVIDER_KEY_VARS = {
     "anthropic": "ANTHROPIC_API_KEY",
@@ -63,19 +91,69 @@ def _format_dotenv(values: dict[str, str]) -> str:
     return "\n".join(lines) + ("\n" if lines else "")
 
 
+def _ai_cache_key(payload: dict[str, Any]) -> str:
+    raw = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return "ai_resp_" + hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _expand_input_paths(inputs: list[Path]) -> list[Path]:
+    expanded: list[Path] = []
+    for path in inputs:
+        resolved = path.expanduser().resolve()
+        if resolved.is_dir():
+            for name in (
+                "assess.json",
+                "profile.json",
+                "fingerprint.json",
+                "cves.json",
+                "intel.json",
+            ):
+                cand = resolved / name
+                if cand.is_file():
+                    expanded.append(cand)
+            if not expanded:
+                for p in sorted(resolved.glob("*.json"))[:6]:
+                    if p.is_file():
+                        expanded.append(p)
+        else:
+            expanded.append(path)
+    return expanded
+
+
 class AIService:
-    """Manages `.env` credentials and multi-provider defensive AI triage workflows."""
+    """Manages `.env`, skills, distillation, pipelines, grounding, ReAct investigation, & chat."""
 
     def __init__(
         self,
         cfg: RuntimeConfig,
         *,
         audit_logger: AuditLogger | None = None,
+        cache: CVECache | None = None,
         transport: httpx.BaseTransport | None = None,
+        sleeper: Callable[[float], None] | None = None,
     ) -> None:
         self._cfg = cfg
         self._audit = audit_logger if audit_logger is not None else AuditLogger(cfg.audit_log)
+        self._cache = cache
         self._transport = transport
+        self._sleeper = sleeper
+
+    @property
+    def cache(self) -> CVECache:
+        """Lazily initialize local SQLite cache for optional AI response caching."""
+        if self._cache is None:
+            self._cache = CVECache(self._cfg.cache_db)
+        return self._cache
+
+    def list_skills(self) -> AISkillsCatalog:
+        """Return all bundled and custom (`~/.s1shell/skills.d/*.yaml`) defensive AI skills."""
+        skills = load_skills(extra_dir=self._cfg.skills_dir)
+        custom_count = sum(1 for s in skills if s.source != "bundled")
+        return AISkillsCatalog(skills=skills, custom_count=custom_count)
+
+    def get_skill(self, skill_id: str) -> AISkill:
+        """Retrieve a single defensive AI skill definition by ID."""
+        return get_skill(skill_id, extra_dir=self._cfg.skills_dir)
 
     def env_status(self, *, provider: str | None = None) -> AIEnvStatus:
         """Inspect current AI provider, API key, endpoint, and model configuration safely."""
@@ -127,7 +205,7 @@ class AIService:
         base_url: str | None = None,
         env_file: Path | None = None,
     ) -> AIEnvStatus:
-        """Persist AI provider, key, endpoint, and/or model to a `0600` `.env` file."""
+        """Persist AI provider, key, endpoint, and/or model atomically to a `0600` `.env` file."""
         clean_key = api_key.strip() if api_key is not None else None
         clean_model = model.strip() if model is not None else None
         clean_prov = provider.strip().lower() if provider is not None else None
@@ -203,39 +281,19 @@ class AIService:
             )
         return self.env_status(provider=active_prov)
 
-    def analyze(
+    def _prepare_artifact_bundle(
         self,
         *,
-        inputs: list[Path] | None = None,
-        prompt: str | None = None,
-        model: str | None = None,
-        provider: str | None = None,
-        base_url: str | None = None,
-        mode: str = "triage",
-        redact: bool = False,
-        max_tokens: int = 1024,
-    ) -> AIAnalysisResult:
-        """Run defensive AI analysis over saved S1shell JSON artifacts and/or a prompt."""
-        artifact_paths = list(inputs or [])
-        clean_prompt = prompt.strip() if prompt else ""
-        if not artifact_paths and not clean_prompt:
-            raise ValidationError("Provide at least one --input artifact or --prompt.")
-        if max_tokens <= 0:
-            raise ValidationError("--max-tokens must be a positive integer.")
-
-        system_prompt = build_system_prompt(mode)
-        active_prov = (provider or self._cfg.get_ai_provider()).strip().lower()
-        api_key, _ = self._cfg.get_ai_api_key(active_prov)
-        client = build_ai_client(
-            self._cfg,
-            provider=active_prov,
-            api_key=api_key,
-            base_url=base_url,
-            transport=self._transport,
-        )
-
+        inputs: list[Path],
+        redact: bool,
+        compact: bool,
+    ) -> tuple[list[Path], list[Any], list[str], TelemetryRedactor | None, list[str]]:
+        artifact_paths = _expand_input_paths(inputs)
         redactor = TelemetryRedactor() if redact else None
-        artifact_blocks: list[str] = []
+        raw_objects: list[Any] = []
+        blocks: list[str] = []
+        injection_warnings: list[str] = []
+
         for path in artifact_paths:
             try:
                 raw_text = path.read_text(encoding="utf-8")
@@ -246,24 +304,203 @@ class AIService:
             except ValueError as exc:
                 raise ValidationError(f"Invalid JSON in artifact '{path}': {exc}") from exc
 
+            raw_objects.append(parsed)
+            processed = distill_artifact(parsed, max_chars=12_000) if compact else parsed
             if redactor is not None:
-                parsed = redactor.redact_artifact(parsed)
+                processed = redactor.redact_artifact(processed)
 
-            pretty = json.dumps(parsed, indent=2)
+            pretty = json.dumps(processed, indent=2)
             if len(pretty) > _MAX_ARTIFACT_CHARS:
                 pretty = pretty[:_MAX_ARTIFACT_CHARS] + "\n... [truncated]"
-            artifact_blocks.append(
-                f"### Artifact: {path.name}\n"
-                f'<untrusted_telemetry source="{path.name}">\n'
-                f"{pretty}\n"
-                "</untrusted_telemetry>"
-            )
 
-        task_text = (
-            clean_prompt
-            if clean_prompt
+            wrapped, warns = wrap_untrusted_telemetry(pretty, source=path.name)
+            injection_warnings.extend(warns)
+            blocks.append(f"### Artifact: {path.name}\n{wrapped}")
+
+        return artifact_paths, raw_objects, blocks, redactor, injection_warnings
+
+    def prepare_context(
+        self,
+        *,
+        inputs: list[Path],
+        skill: str | None = None,
+        mode: str = "triage",
+        redact: bool = True,
+        compact: bool = True,
+        prompt: str | None = None,
+    ) -> dict[str, Any]:
+        """Build an offline distilled, redacted, guardrail-wrapped prompt bundle (no LLM calls)."""
+        skill_obj = self.get_skill(skill) if skill else None
+        skill_addendum = build_skill_prompt_addendum(skill_obj) if skill_obj is not None else None
+        system_prompt = build_system_prompt(mode, skill_addendum=skill_addendum)
+
+        artifact_paths, raw_objects, blocks, redactor, inj_warnings = self._prepare_artifact_bundle(
+            inputs=inputs,
+            redact=redact,
+            compact=compact,
+        )
+        default_task = (
+            skill_obj.user_template
+            if (skill_obj is not None and skill_obj.user_template)
             else "Triage the provided S1shell artifacts and recommend prioritized defensive steps."
         )
+        task_text = prompt.strip() if prompt and prompt.strip() else default_task
+        eff_task = redactor.redact_text(task_text) if redactor is not None else task_text
+        user_parts = [f"Operator request:\n{eff_task}"]
+        if blocks:
+            user_parts.append("S1shell JSON artifacts:\n\n" + "\n\n".join(blocks))
+
+        return {
+            "artifact_type": "ai_prepared_context",
+            "skill": skill_obj.id if skill_obj else None,
+            "mode": mode.strip().lower(),
+            "redacted": redact,
+            "redactions_applied": redactor.replacement_count if redactor is not None else 0,
+            "compact": compact,
+            "input_artifacts": [str(p) for p in artifact_paths],
+            "known_references": sorted(extract_known_references(raw_objects)),
+            "injection_warnings": inj_warnings,
+            "system_prompt": system_prompt,
+            "user_prompt": "\n\n".join(user_parts),
+        }
+
+    def _complete_with_fallback(
+        self,
+        *,
+        primary_client: AIClientProtocol,
+        primary_provider: str,
+        primary_model: str,
+        fallback_provider: str | None,
+        local_only: bool,
+        prompt: str,
+        max_tokens: int,
+        system_prompt: str,
+    ) -> tuple[str, int, int, str, str, str | None]:
+        started = time.monotonic()
+        try:
+            text, in_tok, out_tok = primary_client.complete(
+                prompt=prompt,
+                model=primary_model,
+                max_tokens=max_tokens,
+                system_prompt=system_prompt,
+            )
+            self._log_intel("ai analyze", primary_client.audit_target, "success", 0, started)
+            return text, in_tok, out_tok, primary_provider, primary_model, None
+        except NetworkError as primary_exc:
+            self._log_intel(
+                "ai analyze",
+                primary_client.audit_target,
+                "error",
+                int(ExitCode.ERROR),
+                started,
+                error=str(primary_exc),
+            )
+            if not fallback_provider or fallback_provider.strip().lower() == primary_provider:
+                raise
+            fb_prov = fallback_provider.strip().lower()
+            fb_key, _ = self._cfg.get_ai_api_key(fb_prov)
+            fb_client = build_ai_client(
+                self._cfg,
+                provider=fb_prov,
+                api_key=fb_key,
+                local_only=local_only,
+                transport=self._transport,
+                sleeper=self._sleeper,
+            )
+            fb_model = self._cfg.get_ai_model(fb_prov)
+            fb_started = time.monotonic()
+            try:
+                text, in_tok, out_tok = fb_client.complete(
+                    prompt=prompt,
+                    model=fb_model,
+                    max_tokens=max_tokens,
+                    system_prompt=system_prompt,
+                )
+                self._log_intel("ai analyze", fb_client.audit_target, "success", 0, fb_started)
+                return text, in_tok, out_tok, fb_prov, fb_model, fb_prov
+            except Exception as fb_exc:
+                self._log_intel(
+                    "ai analyze",
+                    fb_client.audit_target,
+                    "error",
+                    int(ExitCode.ERROR),
+                    fb_started,
+                    error=str(fb_exc),
+                )
+                raise
+        except Exception as exc:
+            self._log_intel(
+                "ai analyze",
+                primary_client.audit_target,
+                "error",
+                int(ExitCode.ERROR),
+                started,
+                error=str(exc),
+            )
+            raise
+
+    def analyze(
+        self,
+        *,
+        inputs: list[Path] | None = None,
+        prompt: str | None = None,
+        model: str | None = None,
+        provider: str | None = None,
+        base_url: str | None = None,
+        mode: str = "triage",
+        skill: str | None = None,
+        pipeline: str | None = None,
+        structured: bool = False,
+        redact: bool = False,
+        restore: bool = False,
+        compact: bool = True,
+        local_only: bool = False,
+        fallback_provider: str | None = None,
+        use_cache: bool = False,
+        refresh_cache: bool = False,
+        max_tokens: int = 1024,
+    ) -> AIAnalysisResult:
+        """Run defensive AI analysis with skills, pipelines, guardrails, grounding, & redaction."""
+        raw_inputs = list(inputs or [])
+        clean_prompt = prompt.strip() if prompt else ""
+        if not raw_inputs and not clean_prompt:
+            raise ValidationError("Provide at least one --input artifact or --prompt.")
+        if max_tokens <= 0:
+            raise ValidationError("--max-tokens must be a positive integer.")
+
+        skill_obj = self.get_skill(skill) if skill else None
+        skill_addendum = build_skill_prompt_addendum(skill_obj) if skill_obj is not None else None
+        system_prompt = build_system_prompt(mode, skill_addendum=skill_addendum)
+        if structured:
+            system_prompt = f"{system_prompt}\n\n{STRUCTURED_OUTPUT_INSTRUCTIONS}"
+
+        active_prov = (provider or self._cfg.get_ai_provider()).strip().lower()
+        api_key, _ = self._cfg.get_ai_api_key(active_prov)
+        client = build_ai_client(
+            self._cfg,
+            provider=active_prov,
+            api_key=api_key,
+            base_url=base_url,
+            local_only=local_only,
+            transport=self._transport,
+            sleeper=self._sleeper,
+        )
+
+        artifact_paths, raw_objects, artifact_blocks, redactor, injection_warnings = (
+            self._prepare_artifact_bundle(
+                inputs=raw_inputs,
+                redact=redact,
+                compact=compact,
+            )
+        )
+        known_refs = extract_known_references(raw_objects)
+
+        default_task = (
+            skill_obj.user_template
+            if (skill_obj is not None and skill_obj.user_template)
+            else "Triage the provided S1shell artifacts and recommend prioritized defensive steps."
+        )
+        task_text = clean_prompt if clean_prompt else default_task
         effective_task = redactor.redact_text(task_text) if redactor is not None else task_text
         prompt_parts = [f"Operator request:\n{effective_task}"]
         if artifact_blocks:
@@ -273,38 +510,365 @@ class AIService:
         chosen_model = (
             model.strip() if model and model.strip() else self._cfg.get_ai_model(active_prov)
         )
-        started = time.monotonic()
 
-        try:
-            analysis_text, in_tok, out_tok = client.complete(
-                prompt=full_prompt,
-                model=chosen_model,
-                max_tokens=max_tokens,
-                system_prompt=system_prompt,
+        # Optional SQLite response cache (only for single-shot non-pipeline runs)
+        cache_k: str | None = None
+        if use_cache and not pipeline:
+            cache_k = _ai_cache_key(
+                {
+                    "provider": active_prov,
+                    "model": chosen_model,
+                    "mode": mode.strip().lower(),
+                    "skill": skill_obj.id if skill_obj else None,
+                    "structured": structured,
+                    "system": system_prompt,
+                    "prompt": _TELEMETRY_NONCE_RE.sub('id="t_NONCE"', full_prompt),
+                }
             )
-            self._log_intel("ai analyze", client.audit_target, "success", 0, started)
-        except Exception as exc:
-            self._log_intel(
-                "ai analyze",
-                client.audit_target,
-                "error",
-                int(ExitCode.ERROR),
-                started,
-                error=str(exc),
+            if not refresh_cache:
+                cached_val = self.cache.get(cache_k, ttl_seconds=self._cfg.cve_cache_ttl_seconds)
+                if isinstance(cached_val, dict) and isinstance(cached_val.get("analysis"), str):
+                    analysis_text = cached_val["analysis"]
+                    restored_flag = False
+                    if redactor is not None and restore:
+                        analysis_text = redactor.restore_text(analysis_text)
+                        restored_flag = True
+                    cached_struct = parse_structured_json(analysis_text) if structured else None
+                    grounding = (
+                        verify_analysis_grounding(analysis_text, known_refs)
+                        if raw_objects
+                        else None
+                    )
+                    return AIAnalysisResult(
+                        model=chosen_model,
+                        task=task_text,
+                        input_artifacts=[str(p) for p in artifact_paths],
+                        analysis=analysis_text,
+                        input_tokens=int(cached_val.get("input_tokens", 0) or 0),
+                        output_tokens=int(cached_val.get("output_tokens", 0) or 0),
+                        provider=active_prov,
+                        mode=mode.strip().lower(),
+                        redacted=redact,
+                        skill=skill_obj.id if skill_obj else None,
+                        structured_data=cached_struct,
+                        redactions_applied=redactor.replacement_count if redactor else 0,
+                        restored=restored_flag,
+                        cached=True,
+                        injection_warnings=injection_warnings,
+                        grounding=grounding,
+                    )
+
+        pipeline_stages: list[AIPipelineStageResult] = []
+        used_prov = active_prov
+        used_model = chosen_model
+        fallback_used: str | None = None
+        in_tok = 0
+        out_tok = 0
+
+        if pipeline:
+            stages = get_pipeline_stages(pipeline)
+            prior_outputs: list[str] = []
+            analysis_text = ""
+            for idx, stage in enumerate(stages):
+                stage_sys = f"{system_prompt}\n\nPipeline role ({stage.role}): {stage.instruction}"
+                stage_prompt = full_prompt
+                if prior_outputs:
+                    stage_prompt += "\n\nPrior Verified Stage Outputs:\n\n" + "\n\n---\n\n".join(
+                        prior_outputs
+                    )
+                if structured and idx == len(stages) - 1:
+                    stage_sys = f"{stage_sys}\n\n{STRUCTURED_OUTPUT_INSTRUCTIONS}"
+
+                s_text, s_in, s_out, used_prov, used_model, fb_used = self._complete_with_fallback(
+                    primary_client=client,
+                    primary_provider=active_prov,
+                    primary_model=chosen_model,
+                    fallback_provider=fallback_provider,
+                    local_only=local_only,
+                    prompt=stage_prompt,
+                    max_tokens=max_tokens,
+                    system_prompt=stage_sys,
+                )
+                if fb_used:
+                    fallback_used = fb_used
+                in_tok += s_in
+                out_tok += s_out
+                analysis_text = s_text
+                prior_outputs.append(f"### {stage.name} ({stage.role})\n{s_text}")
+                pipeline_stages.append(
+                    AIPipelineStageResult(
+                        stage=stage.name,
+                        role=stage.role,
+                        input_tokens=s_in,
+                        output_tokens=s_out,
+                        preview=s_text[:200],
+                    )
+                )
+        else:
+            analysis_text, in_tok, out_tok, used_prov, used_model, fallback_used = (
+                self._complete_with_fallback(
+                    primary_client=client,
+                    primary_provider=active_prov,
+                    primary_model=chosen_model,
+                    fallback_provider=fallback_provider,
+                    local_only=local_only,
+                    prompt=full_prompt,
+                    max_tokens=max_tokens,
+                    system_prompt=system_prompt,
+                )
             )
-            raise
+
+        # Structured JSON validation + single automatic repair retry if malformed
+        struct_data: dict[str, Any] | None = None
+        if structured:
+            struct_data = parse_structured_json(analysis_text)
+            if struct_data is None:
+                repair_prompt = (
+                    "Your previous reply did not match the required JSON schema. "
+                    "Convert the following content into a single strictly valid JSON object "
+                    "matching the schema without adding new Finding or CVE IDs:\n\n"
+                    f"{analysis_text[:4000]}"
+                )
+                rep_text, r_in, r_out, used_prov, used_model, fb_used = (
+                    self._complete_with_fallback(
+                        primary_client=client,
+                        primary_provider=active_prov,
+                        primary_model=chosen_model,
+                        fallback_provider=fallback_provider,
+                        local_only=local_only,
+                        prompt=repair_prompt,
+                        max_tokens=max_tokens,
+                        system_prompt=system_prompt,
+                    )
+                )
+                if fb_used:
+                    fallback_used = fb_used
+                in_tok += r_in
+                out_tok += r_out
+                rep_parsed = parse_structured_json(rep_text)
+                if rep_parsed is not None:
+                    analysis_text = rep_text
+                    struct_data = rep_parsed
+
+        if cache_k is not None:
+            self.cache.set(
+                cache_k,
+                {
+                    "analysis": analysis_text,
+                    "input_tokens": in_tok,
+                    "output_tokens": out_tok,
+                },
+            )
+
+        restored_flag = False
+        if redactor is not None and restore:
+            analysis_text = redactor.restore_text(analysis_text)
+            if struct_data is not None:
+                struct_data = parse_structured_json(analysis_text) or struct_data
+            restored_flag = True
+
+        grounding = verify_analysis_grounding(analysis_text, known_refs) if raw_objects else None
 
         return AIAnalysisResult(
-            model=chosen_model,
+            model=used_model,
             task=task_text,
             input_artifacts=[str(p) for p in artifact_paths],
             analysis=analysis_text,
             input_tokens=in_tok,
             output_tokens=out_tok,
-            provider=active_prov,
+            provider=used_prov,
             mode=mode.strip().lower(),
             redacted=redact,
+            skill=skill_obj.id if skill_obj else None,
+            pipeline=pipeline.strip().lower() if pipeline else None,
+            pipeline_stages=pipeline_stages,
+            structured_data=struct_data,
+            redactions_applied=redactor.replacement_count if redactor else 0,
+            restored=restored_flag,
+            cached=False,
+            fallback_used=fallback_used,
+            injection_warnings=injection_warnings,
+            grounding=grounding,
         )
+
+    def investigate(
+        self,
+        *,
+        inputs: list[Path],
+        goal: str,
+        model: str | None = None,
+        provider: str | None = None,
+        base_url: str | None = None,
+        max_steps: int = 5,
+        max_tokens: int = 1200,
+        redact: bool = False,
+        restore: bool = False,
+        local_only: bool = False,
+        tool_executor: ReadOnlyToolExecutor | None = None,
+        custom_tool_runner: Callable[[str, dict[str, Any]], tuple[str, Any]] | None = None,
+    ) -> AIInvestigationResult:
+        """Run a bounded read-only ReAct investigation over artifacts & offline/passive tools."""
+        active_prov = (provider or self._cfg.get_ai_provider()).strip().lower()
+        api_key, _ = self._cfg.get_ai_api_key(active_prov)
+        client = build_ai_client(
+            self._cfg,
+            provider=active_prov,
+            api_key=api_key,
+            base_url=base_url,
+            local_only=local_only,
+            transport=self._transport,
+            sleeper=self._sleeper,
+        )
+        chosen_model = (
+            model.strip() if model and model.strip() else self._cfg.get_ai_model(active_prov)
+        )
+        executor = (
+            tool_executor
+            if tool_executor is not None
+            else ReadOnlyToolExecutor(self._cfg, audit_logger=self._audit)
+        )
+        return run_readonly_investigation(
+            client=client,
+            executor=executor,
+            audit_logger=self._audit,
+            provider=active_prov,
+            model=chosen_model,
+            goal=goal,
+            inputs=inputs,
+            max_steps=max_steps,
+            max_tokens=max_tokens,
+            redact=redact,
+            restore=restore,
+            custom_tool_runner=custom_tool_runner,
+        )
+
+    def chat(
+        self,
+        *,
+        inputs: list[Path] | None = None,
+        skill: str | None = None,
+        model: str | None = None,
+        provider: str | None = None,
+        base_url: str | None = None,
+        redact: bool = False,
+        restore: bool = False,
+        local_only: bool = False,
+        max_tokens: int = 1024,
+        stdin: TextIO | None = None,
+        stdout: TextIO | None = None,
+    ) -> int:
+        """Interactive multi-turn defensive copilot over saved engagement artifacts."""
+        in_stream = stdin if stdin is not None else sys.stdin
+        out_stream = stdout if stdout is not None else sys.stdout
+
+        active_prov = (provider or self._cfg.get_ai_provider()).strip().lower()
+        api_key, _ = self._cfg.get_ai_api_key(active_prov)
+        client = build_ai_client(
+            self._cfg,
+            provider=active_prov,
+            api_key=api_key,
+            base_url=base_url,
+            local_only=local_only,
+            transport=self._transport,
+            sleeper=self._sleeper,
+        )
+        chosen_model = (
+            model.strip() if model and model.strip() else self._cfg.get_ai_model(active_prov)
+        )
+
+        active_skill: AISkill | None = self.get_skill(skill) if skill else None
+        active_redact = redact
+        artifact_paths, raw_objects, artifact_blocks, redactor, inj_warnings = (
+            self._prepare_artifact_bundle(
+                inputs=list(inputs or []),
+                redact=active_redact,
+                compact=True,
+            )
+        )
+        known_refs = extract_known_references(raw_objects)
+        history: list[tuple[str, str]] = []
+
+        out_stream.write(
+            f"S1shell AI Copilot ({active_prov}/{chosen_model}) | "
+            f"artifacts={len(artifact_paths)} | redact={active_redact} | "
+            f"skill={active_skill.id if active_skill else 'none'}\n"
+            "Commands: /skill <id>, /skills, /verify, /save <file.md>, /exit\n"
+        )
+        if inj_warnings:
+            out_stream.write(
+                f"[Warning] Prompt-injection patterns neutralized: {len(inj_warnings)}\n"
+            )
+        out_stream.flush()
+
+        for raw_line in in_stream:
+            line = raw_line.strip()
+            if not line:
+                continue
+            if line in {"/exit", "/quit"}:
+                break
+            if line == "/skills":
+                cat = self.list_skills()
+                out_stream.write("Available skills: " + ", ".join(s.id for s in cat.skills) + "\n")
+                out_stream.flush()
+                continue
+            if line.startswith("/skill "):
+                sid = line.split(None, 1)[1].strip()
+                try:
+                    active_skill = self.get_skill(sid)
+                    out_stream.write(f"Switched skill -> {active_skill.id} ({active_skill.name})\n")
+                except ValidationError as exc:
+                    out_stream.write(f"Error: {exc}\n")
+                out_stream.flush()
+                continue
+            if line == "/verify":
+                if not history:
+                    out_stream.write("No assistant reply yet to verify.\n")
+                else:
+                    rep = verify_analysis_grounding(history[-1][1], known_refs)
+                    out_stream.write(f"Grounding: score={rep.grounding_score} | {rep.note}\n")
+                out_stream.flush()
+                continue
+            if line.startswith("/save "):
+                save_path = Path(line.split(None, 1)[1].strip()).expanduser().resolve()
+                md_lines = [f"# S1shell AI Copilot Transcript ({active_prov}/{chosen_model})", ""]
+                for u_msg, a_msg in history:
+                    md_lines.extend([f"## Operator\n\n{u_msg}", "", f"## Assistant\n\n{a_msg}", ""])
+                save_path.parent.mkdir(parents=True, exist_ok=True)
+                save_path.write_text("\n".join(md_lines), encoding="utf-8")
+                out_stream.write(f"Saved transcript to {save_path}\n")
+                out_stream.flush()
+                continue
+
+            sys_prompt = build_system_prompt(
+                "triage",
+                skill_addendum=(
+                    build_skill_prompt_addendum(active_skill) if active_skill is not None else None
+                ),
+            )
+            eff_q = redactor.redact_text(line) if redactor is not None else line
+            prompt_blocks: list[str] = []
+            if artifact_blocks:
+                prompt_blocks.append("Engagement telemetry:\n" + "\n\n".join(artifact_blocks))
+            if history:
+                hist_txt = "\n\n".join(f"User: {u}\nAssistant: {a[:1200]}" for u, a in history[-4:])
+                prompt_blocks.append(f"Recent conversation:\n{hist_txt}")
+            prompt_blocks.append(f"Operator question:\n{eff_q}")
+
+            started = time.monotonic()
+            reply, _, _ = client.complete(
+                prompt="\n\n".join(prompt_blocks),
+                model=chosen_model,
+                max_tokens=max_tokens,
+                system_prompt=sys_prompt,
+            )
+            self._log_intel("ai chat", client.audit_target, "success", 0, started)
+            if redactor is not None and restore:
+                reply = redactor.restore_text(reply)
+            history.append((line, reply))
+            out_stream.write(f"\n{reply}\n\n")
+            out_stream.flush()
+
+        return int(ExitCode.SUCCESS)
 
     def _log_intel(
         self,

@@ -9,6 +9,11 @@ _MODULES = (
     "remediate mcp"
 )
 _COMMON_FLAGS = "--format --out --verbose --no-color --authorized --scope-file --home --help"
+_MCP_CLIENTS = "antigravity claude cursor vscode windsurf http"
+_MCP_FLAGS = (
+    "--transport --host --port --token --generate-token --allow-origin "
+    f"--allow-scoped-targets --url {_COMMON_FLAGS}"
+)
 _OUTCOMES = "success blocked_out_of_scope blocked_unauthorized error"
 _SCOPE_FLAGS = (
     "--owner --ref --expires --include-subdomains --exclude --notes "
@@ -22,15 +27,23 @@ _CVE_FLAGS = (
 _PROFILE_FLAGS = f"--tls-versions --dns-security --well-known --check-methods {_COMMON_FLAGS}"
 _REPORT_FLAGS = f"--input --profile --fingerprint --cve --operator {_COMMON_FLAGS}"
 _AUDIT_FLAGS = f"--limit --category --outcome --command --target {_COMMON_FLAGS}"
+_AI_SKILLS = (
+    "attack-path-modeling pentest-report-writer threat-intel-correlator "
+    "sbom-supply-chain zero-trust-hardening compliance-mapper "
+    "detection-engineering retest-diff-brief token-crypto-auditor"
+)
 _AI_FLAGS = (
     "--provider --base-url --set-key --model --env-file --input --prompt "
-    f"--mode --redact --max-tokens {_COMMON_FLAGS}"
+    "--mode --skill --pipeline --structured --redact --restore --raw-context "
+    "--local-only --fallback --cache --refresh --goal --max-steps "
+    f"--max-tokens {_COMMON_FLAGS}"
 )
 _ASSESS_FLAGS = (
     "--targets-file --delay --no-tls-versions --no-dns-security --well-known "
     "--check-methods --preset --ignore-finding --no-remediate --intel "
     "--skip-cve --enrich-cve --min-cvss --cve-limit --offline --ai --ai-provider "
-    f"--ai-mode --redact --fail-on --min-score --operator --out-dir {_COMMON_FLAGS}"
+    "--ai-mode --ai-skill --ai-pipeline --redact --restore --local-only "
+    f"--fail-on --min-score --operator --out-dir {_COMMON_FLAGS}"
 )
 _INTEL_FLAGS = (
     "--set-nvd-key --set-github-key --set-vt-key --set-greynoise-key --set-urlscan-key "
@@ -75,6 +88,14 @@ _s1shell_completions() {{
             ;;
         --mode|--ai-mode)
             COMPREPLY=( $(compgen -W "triage executive remediate" -- "${{cur}}") )
+            return 0
+            ;;
+        --pipeline|--ai-pipeline)
+            COMPREPLY=( $(compgen -W "deep-triage purple-team executive-pack" -- "${{cur}}") )
+            return 0
+            ;;
+        --skill|--ai-skill)
+            COMPREPLY=( $(compgen -W "{_AI_SKILLS}" -- "${{cur}}") )
             return 0
             ;;
         --category)
@@ -137,7 +158,7 @@ _s1shell_completions() {{
             ;;
         ai)
             if [[ ${{COMP_CWORD}} -eq 2 ]]; then
-                COMPREPLY=( $(compgen -W "env analyze" -- "${{cur}}") )
+                COMPREPLY=( $(compgen -W "env analyze skills investigate chat" -- "${{cur}}") )
             else
                 COMPREPLY=( $(compgen -W "{_AI_FLAGS}" -- "${{cur}}") )
             fi
@@ -167,9 +188,11 @@ _s1shell_completions() {{
             ;;
         mcp)
             if [[ ${{COMP_CWORD}} -eq 2 ]]; then
-                COMPREPLY=( $(compgen -W "serve" -- "${{cur}}") )
+                COMPREPLY=( $(compgen -W "serve config ping" -- "${{cur}}") )
+            elif [[ ${{COMP_CWORD}} -eq 3 && "${{COMP_WORDS[2]}}" == "config" ]]; then
+                COMPREPLY=( $(compgen -W "{_MCP_CLIENTS}" -- "${{cur}}") )
             else
-                COMPREPLY=( $(compgen -W "{_COMMON_FLAGS}" -- "${{cur}}") )
+                COMPREPLY=( $(compgen -W "{_MCP_FLAGS}" -- "${{cur}}") )
             fi
             ;;
         *)
@@ -200,7 +223,7 @@ _s1shell() {
         'assess:All-in-one authorized target or batch assessment pipeline'
         'diff:Compare baseline vs current assessment artifacts'
         'remediate:Generate offline deterministic hardening config snippets'
-        'mcp:Run read-only offline/intel MCP stdio server'
+        'mcp:Run online Streamable HTTP or local stdio read-only MCP server'
     )
 
     _arguments -C \\
@@ -263,13 +286,20 @@ _s1shell() {
                     local -a subcmds
                     subcmds=(
                         'env:Show or update AI .env settings'
-                        'analyze:Run defensive AI artifact analysis'
+                        'analyze:Run defensive AI analysis with skills and pipelines'
+                        'skills:List or inspect bundled and custom AI skills'
+                        'investigate:Run bounded read-only ReAct AI investigation'
+                        'chat:Interactive multi-turn defensive AI copilot'
                     )
                     _describe 'ai command' subcmds
                     ;;
                 mcp)
                     local -a subcmds
-                    subcmds=('serve:Start read-only offline MCP server')
+                    subcmds=(
+                        'serve:Start online Streamable HTTP or local stdio MCP server'
+                        'config:Print ready-to-paste MCP client JSON configuration'
+                        'ping:Test connectivity and capabilities of an online HTTP MCP server'
+                    )
                     _describe 'mcp command' subcmds
                     ;;
                 intel)
@@ -317,15 +347,15 @@ complete -c s1shell -n "__fish_use_subcommand" -a "ai" -d "AI providers and defe
 complete -c s1shell -n "__fish_use_subcommand" -a "assess" -d "Single or batch target assessment"
 complete -c s1shell -n "__fish_use_subcommand" -a "diff" -d "Compare baseline vs current assess"
 complete -c s1shell -n "__fish_use_subcommand" -a "remediate" -d "Offline hardening config playbook"
-complete -c s1shell -n "__fish_use_subcommand" -a "mcp" -d "Read-only offline MCP stdio server"
+complete -c s1shell -n "__fish_use_subcommand" -a "mcp" -d "Online HTTP or local stdio MCP server"
 
 complete -c s1shell -n "__fish_seen_subcommand_from scope" -a "add import list check remove expire"
 complete -c s1shell -n "__fish_seen_subcommand_from cve" -a "search get audit cache"
 complete -c s1shell -n "__fish_seen_subcommand_from report" -a "build"
 complete -c s1shell -n "__fish_seen_subcommand_from audit" -a "list verify"
 complete -c s1shell -n "__fish_seen_subcommand_from completion" -a "bash zsh fish"
-complete -c s1shell -n "__fish_seen_subcommand_from ai" -a "env analyze"
-complete -c s1shell -n "__fish_seen_subcommand_from mcp" -a "serve"
+complete -c s1shell -n "__fish_seen_subcommand_from ai" -a "env analyze skills investigate chat"
+complete -c s1shell -n "__fish_seen_subcommand_from mcp" -a "serve config ping"
 complete -c s1shell -n "__fish_seen_subcommand_from intel" -a "env lookup advisory ct rdap"
 complete -c s1shell -n "__fish_seen_subcommand_from codec" -a "decode encode inspect hash"
 

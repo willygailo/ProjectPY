@@ -2,6 +2,28 @@
 
 All notable changes to S1shell will be documented in this file.
 
+## [Unreleased]
+
+### Added — Advanced Defensive AI Tactics, Skills Library, Pipelines & Read-Only Investigator (`s1shell ai`)
+- **Prompt-Injection Guardrails & Signal-First Distillation (`ai/guardrails.py`, `ai/distill.py`)**:
+  - Wrapped untrusted telemetry in nonce-tagged `<untrusted_telemetry id="t_...">` delimiters with tag-breakout neutralization and heuristic prompt-injection detectors surfaced in `injection_warnings` and audit logs.
+  - Added artifact-aware distillation compacting oversized `assess`, `profile`, `cve`, `intel`, `dependency_audit`, and `ct` reports while preserving findings, CVEs, KEV/EPSS priority, and EOL signals (`--no-compact` available).
+  - Added reversible NDA redaction (`--redact --restore`), air-gap `--local-only` loopback endpoint enforcement, SQLite LLM response caching (`--cache` / `--refresh`), and HTTP `429`/`502`/`503`/`504` retry/backoff with `--fallback <provider>` failover.
+- **Declarative Defensive AI Skills Library (`ai/skills.yaml`, `ai/skills.py`)**:
+  - Shipped **9 built-in defensive skills** (`attack-path-modeling`, `pentest-report-writer`, `threat-intel-correlator`, `sbom-supply-chain`, `zero-trust-hardening`, `compliance-mapper`, `detection-engineering`, `retest-diff-brief`, `token-crypto-auditor`) plus custom `~/.s1shell/skills.d/*.yaml` overrides, inspectable via `s1shell ai skills list|show` and `s1shell doctor`.
+  - Added `--skill <id>` and `--structured` validated JSON output (with single automatic repair pass) across `ai analyze` and `assess --ai-triage --ai-skill ...`.
+- **Multi-Stage Pipelines & Deterministic Anti-Hallucination Grounding (`ai/pipelines.py`, `ai/verify.py`)**:
+  - Added `--pipeline {deep-triage,purple-team,executive-pack}` chaining specialized Analyst -> Architect -> Critic / Blue-Team stages (`--ai-pipeline` also supported on `assess`).
+  - Added offline regex grounding verifier (`grounding_score`, `verified_refs`, `ungrounded_refs`) checking every cited Finding and CVE ID against input artifacts.
+- **Read-Only Agentic Investigator & Interactive Copilot (`ai/investigate.py`, `s1shell ai investigate|chat`)**:
+  - Added `s1shell ai investigate --goal "..." --input ... --max-steps N` executing a bounded (1–8 steps) ReAct loop strictly allowlisted to **9 offline/passive read-only S1shell tools** (zero target-touching capability) with full audit logging and grounding verification.
+  - Added interactive multi-turn `s1shell ai chat` supporting `/skill`, `/skills`, `/verify`, `/save`, and `/exit`.
+- **Online Streamable HTTP & Local Stdio MCP Server (`mcp_server.py`, `s1shell mcp serve|config|ping`)**:
+  - Upgraded `s1shell mcp serve` to support both **Online Streamable HTTP (`--transport http`, MCP `2025-03-26`, `POST /mcp`, `GET /healthz`, `DELETE /mcp`)** and local `stdio` with zero extra dependencies (`http.server.ThreadingHTTPServer`).
+  - Added fail-closed online security guards: loopback default (`127.0.0.1:8765`), mandatory Bearer auth (`--token` / `--generate-token` / `S1SHELL_MCP_TOKEN`) when binding non-loopback hosts, constant-time `secrets.compare_digest` verification, `Origin` DNS-rebinding protection (`--allow-origin`), and 2 MiB request body cap.
+  - Added `s1shell_ai_analyze` (`22` default online/offline read-only tools), native **MCP Resources** (`s1shell://doctor`, `s1shell://scope`, `s1shell://skills`, `s1shell://audit/recent`), native **MCP Prompts** (all 9+ defensive AI skills), and opt-in fail-closed **`--allow-scoped-targets --authorized`** mode (`+3` guarded read-only tools: `s1shell_profile`, `s1shell_fingerprint`, `s1shell_assess`).
+  - Added `s1shell mcp config {antigravity,claude,cursor,vscode,windsurf,http}` and `s1shell mcp ping` CLI utilities.
+
 ## [0.4.2] - 2026-11-20
 
 ### Security & Reliability Hardening

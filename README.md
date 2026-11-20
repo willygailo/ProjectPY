@@ -11,8 +11,8 @@
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776ab?style=for-the-badge&logo=python&logoColor=white)](pyproject.toml)
 [![Platform](https://img.shields.io/badge/Kali_Linux-Linux-557c94?style=for-the-badge&logo=kalilinux&logoColor=white)](scripts/install-kali.sh)
 [![License: MIT](https://img.shields.io/badge/License-MIT-10b981?style=for-the-badge)](LICENSE)
-[![Tests](https://img.shields.io/badge/Offline_Tests-90_Passed-22c55e?style=for-the-badge)](.github/workflows/ci.yml)
-[![MCP](https://img.shields.io/badge/MCP_Server-19_Read--Only_Tools-8b5cf6?style=for-the-badge)](#read-only-offline-mcp-server-s1shell-mcp-serve)
+[![Tests](https://img.shields.io/badge/Tests-Passing-22c55e?style=for-the-badge)](.github/workflows/ci.yml)
+[![MCP](https://img.shields.io/badge/MCP_Server-Online_HTTP_%2B_Stdio-8b5cf6?style=for-the-badge)](#online-and-local-mcp-server-s1shell-mcp-serve)
 
 <br />
 
@@ -21,7 +21,7 @@
 [⚡ Setup & Install](#part-1-setup--configuration) &nbsp;·&nbsp;
 [🔑 API Keys & Logins](#13-configure-optional-api-keys--ai-provider-env-atomic-0600) &nbsp;·&nbsp;
 [🎯 Pentesting Guide (`target.com`)](#part-2-pentesting--assessment-guide-example-httpswwwtargetcom) &nbsp;·&nbsp;
-[🤖 MCP Server](#read-only-offline-mcp-server-s1shell-mcp-serve) &nbsp;·&nbsp;
+[🌐 Online MCP Server](#online-and-local-mcp-server-s1shell-mcp-serve) &nbsp;·&nbsp;
 [📖 CLI Reference](#part-3-reference-cicd--troubleshooting)
 
 </div>
@@ -32,7 +32,7 @@
 
 ```mermaid
 flowchart LR
-    CLI["s1shell CLI / Read-Only MCP"] --> GATE["Policy Gate\nScope -> Auth -> IP Pin -> SHA-256 Audit"]
+    CLI["s1shell CLI / Online HTTP & Stdio MCP"] --> GATE["Policy Gate\nScope -> Auth -> IP Pin -> SHA-256 Audit"]
     CLI --> INTEL["Zero-Target-Contact Intel\nSQLite TTL Cache + Retry"]
     CLI --> OFFLINE["Offline Analysis & Reporting\nZero Network Required"]
 
@@ -87,8 +87,8 @@ flowchart LR
       Zero-network <code>s1shell codec decode|encode|inspect|hash</code> across 25 codecs (Base64/32/58/85, Hex, URL, HTML, Unicode, Punycode, ROT13/Caesar, Gzip/Zlib/Deflate, SAML XML, JWT, auto magic peeling), X.509 PEM/DER inspection, hash ID, and Shannon entropy.
     </td>
     <td width="50%" valign="top">
-      <h3>🤖 Multi-Provider Defensive AI &amp; 19-Tool MCP</h3>
-      Supports air-gapped local <b>Ollama</b>, <b>Anthropic</b>, <b>OpenAI-compatible</b>, and <b>Google Gemini</b> with <code>&lt;untrusted_telemetry&gt;</code> isolation &amp; reversible NDA redaction (<code>--redact</code> for IPv4/IPv6, hosts, cookies, auth/API-key headers, query secrets, &amp; JWTs), plus a 19-tool read-only stdio MCP server.
+      <h3>🤖 Defensive AI Skills, Pipelines &amp; Online MCP</h3>
+      Supports air-gapped <b>Ollama</b> (<code>--local-only</code>), <b>Anthropic</b>, <b>OpenAI-compatible</b>, and <b>Gemini</b> with <b>9 defensive AI skills</b> (+ custom <code>~/.s1shell/skills.d/*.yaml</code>), multi-stage <code>--pipeline</code> workflows, nonce-tagged prompt-injection guardrails, reversible NDA redaction (<code>--redact --restore</code>), citation grounding checks, bounded read-only <code>ai investigate</code> &amp; <code>ai chat</code>, plus an <b>Online Streamable HTTP + Local Stdio MCP server</b> (22–25 tools, native Prompts &amp; Resources, Bearer auth, &amp; Origin guard).
     </td>
   </tr>
 </table>
@@ -153,7 +153,7 @@ pipx install .
 pipx install --editable --force .</code></pre>
     </td>
     <td valign="top">
-      Creates local <code>.venv</code> and runs the full offline lint, strict typecheck, and 90-test suite:
+      Creates local <code>.venv</code> and runs the full offline lint, strict typecheck, and test suite:
       <br /><br />
       <pre><code>make setup
 source .venv/bin/activate
@@ -229,7 +229,7 @@ s1shell ai env --provider ollama --model "llama3.1:8b"
 # s1shell ai env --provider gemini --set-key "AIza..." --model "gemini-2.5-flash"
 ```
 
-### 1.4 Optional Setup (Shell Completion, Custom Signatures & MCP Server)
+### 1.4 Optional Setup (Shell Completion, Custom Signatures, AI Skills & Online MCP Server)
 
 <details>
 <summary><b>⌨️ Shell Tab-Completion (bash, zsh, fish)</b></summary>
@@ -268,18 +268,84 @@ signatures:
 
 </details>
 
-<a id="read-only-offline-mcp-server-s1shell-mcp-serve"></a>
+<details>
+<summary><b>🧠 Custom Defensive AI Skills (<code>~/.s1shell/skills.d/</code>)</b></summary>
+
+Drop any `*.yaml` file into `~/.s1shell/skills.d/` to add or override S1shell's 9 built-in defensive AI skills (`s1shell ai skills list`):
+
+```yaml
+skills:
+  - id: "k8s-ingress-review"
+    name: "Kubernetes Ingress Hardening Reviewer"
+    category: "hardening"
+    description: "Reviews ingress TLS, HSTS, and header posture for Kubernetes clusters."
+    recommended_modes: ["remediate", "triage"]
+    system_prompt: |
+      Focus exclusively on defensive Kubernetes Ingress and TLS hardening.
+      Cite exact Finding IDs and CVE IDs present in telemetry.
+```
+
+</details>
+
+<a id="online-and-local-mcp-server-s1shell-mcp-serve"></a>
 <details open>
-<summary><b>🤖 Read-Only Offline MCP Server (<code>s1shell mcp serve</code> — 19 Tools)</b></summary>
+<summary><b>🌐 Online &amp; Local Read-Only MCP Server (<code>s1shell mcp serve</code> — Streamable HTTP + Stdio, 22–25 Tools)</b></summary>
 
-Exposes **19 strictly read-only offline/intel tools** over JSON-RPC 2.0 stdio with zero target-touching capability:
+S1shell runs as a **live online MCP server** (MCP `2025-03-26` + `2024-11-05` compatible) over **Online Streamable HTTP** (`--transport http`) or **Local Stdio** (`--transport stdio`), exposing **22 default online/offline read-only tools**, **4 live MCP Resources**, and **9+ native MCP Prompts** (your defensive AI skills):
 
-| Group | Exposed MCP Tools |
-| --- | --- |
-| **Governance & Audit** | `s1shell_doctor`, `s1shell_scope_list`, `s1shell_scope_check`, `s1shell_audit_list`, `s1shell_audit_verify` |
-| **CVE & Supply Chain** | `s1shell_cve_search`, `s1shell_cve_get` (single `cve_id` or batch `cve_ids`), `s1shell_cve_audit` (14 lockfile/SBOM formats + `recursive`) |
-| **Passive Intel & OSINT** | `s1shell_intel_lookup` (VT, GreyNoise, urlscan.io Search, RDAP), `s1shell_intel_advisory` (GHSA), `s1shell_intel_ct` (`crt.sh`), `s1shell_intel_rdap` |
-| **Offline Analysis & Codec** | `s1shell_fingerprint_from_profile`, `s1shell_assess_diff`, `s1shell_remediate`, `s1shell_codec_decode`, `s1shell_codec_encode`, `s1shell_codec_inspect`, `s1shell_codec_hash` |
+#### Start the Online Streamable HTTP MCP Server
+
+```bash
+# 1. Start online Streamable HTTP MCP on localhost:8765 with an auto-generated Bearer token
+s1shell mcp serve --transport http --host 127.0.0.1 --port 8765 --generate-token
+
+# 2. Or bind on a remote Kali/LAN server (non-loopback bind REQUIRES --token or S1SHELL_MCP_TOKEN)
+export S1SHELL_MCP_TOKEN="replace-with-strong-random-token"
+s1shell mcp serve --transport http --host 0.0.0.0 --port 8765
+
+# 3. Optional: enable fail-closed guarded target tools (+3 read-only tools: profile, fingerprint, assess)
+#    Every target call STILL enforces ~/.s1shell/scope.yaml + IP pinning + SHA-256 audit.log
+s1shell mcp serve --transport http --port 8765 --generate-token --allow-scoped-targets --authorized
+
+# 4. Verify your running online MCP server (/healthz + initialize + tools/resources/prompts)
+s1shell mcp ping --url http://127.0.0.1:8765/mcp --token "$S1SHELL_MCP_TOKEN"
+
+# 5. Generate ready-to-paste client JSON config (antigravity | claude | cursor | vscode | windsurf | http)
+s1shell mcp config antigravity --transport http --url http://127.0.0.1:8765/mcp --token "$S1SHELL_MCP_TOKEN"
+```
+
+> [!TIP]
+> **Connecting from another machine?** Either put `http://127.0.0.1:8765/mcp` behind a TLS reverse proxy (Caddy/NGINX) or forward safely over SSH: `ssh -L 8765:127.0.0.1:8765 user@kali-box`. Non-loopback `Origin` headers are blocked (`403`) by default to prevent DNS-rebinding attacks; pass `--allow-origin https://your-client.example` when needed.
+
+#### Exposed Online &amp; Local MCP Capabilities
+
+| Group | Mode | Exposed MCP Tools / Resources / Prompts |
+| --- | --- | --- |
+| **Live Passive Intel &amp; OSINT** | Online (zero target contact) | `s1shell_intel_lookup` (VT, GreyNoise, urlscan.io, RDAP), `s1shell_intel_advisory` (GHSA), `s1shell_intel_ct` (`crt.sh`), `s1shell_intel_rdap` |
+| **Live CVE &amp; SBOM Feeds** | Online (zero target contact) | `s1shell_cve_search` (NVD 2.0 + KEV/EPSS), `s1shell_cve_get` (NVD + CVE.org + GHSA), `s1shell_cve_audit` (OSV.dev across 14 lockfile/SBOM formats + `recursive`) |
+| **Defensive AI &amp; Skills** | Online / Local Ollama | `s1shell_ai_analyze` (skills, pipelines, NDA redaction on by default, grounding check), `s1shell_ai_skills_list`, `s1shell_ai_prepare_context` |
+| **Governance, Analysis &amp; Codec** | Online DNS / Offline | `s1shell_doctor`, `s1shell_scope_list`, `s1shell_scope_check`, `s1shell_audit_list`, `s1shell_audit_verify`, `s1shell_fingerprint_from_profile`, `s1shell_assess_diff`, `s1shell_remediate`, `s1shell_codec_decode`, `s1shell_codec_encode`, `s1shell_codec_inspect`, `s1shell_codec_hash` |
+| **Scoped Target Tools *(Opt-In)*** | Online *(requires `--allow-scoped-targets --authorized`)* | `s1shell_profile`, `s1shell_fingerprint`, `s1shell_assess` — fail-closed `scope.yaml` + SHA-256 `audit.log` on every call |
+| **Native MCP Resources &amp; Prompts** | Built-in | Resources: `s1shell://doctor`, `s1shell://scope`, `s1shell://skills`, `s1shell://audit/recent` · Prompts: all 9 bundled + custom `~/.s1shell/skills.d/*.yaml` skills |
+
+#### Client Configuration Snippets (Online HTTP vs Local Stdio)
+
+**Online Streamable HTTP Client (Antigravity / Cursor / Claude / Generic MCP):**
+
+```json
+{
+  "mcpServers": {
+    "s1shell": {
+      "url": "http://127.0.0.1:8765/mcp",
+      "headers": {
+        "Authorization": "Bearer YOUR_S1SHELL_MCP_TOKEN"
+      }
+    }
+  }
+}
+```
+
+**Local Stdio Client (auto-spawned subprocess — still queries live online intel/CVE/AI feeds):**
 
 ```json
 {
@@ -548,10 +614,33 @@ s1shell codec hash --file ./results/target-com/report.html
 s1shell remediate ./results/target-com/assess.json \
   --stack auto --format md --out ./results/target-com/hardening.md
 
-# 2. Optional NDA-safe AI triage (redacts hostnames, IPv4/IPv6, emails, cookies, auth headers, query secrets & JWTs)
+# 2. Advanced defensive AI tactics (9 skills, multi-stage pipelines, reversible NDA redaction, grounding check)
+s1shell ai skills list
+s1shell ai skills show attack-path-modeling
+
+# Skill-driven analysis with reversible redaction, SQLite cache, & failover
 s1shell ai analyze \
   --input ./results/target-com/assess.json \
-  --mode remediate --redact --format md --out ./results/target-com/ai_remediation.md
+  --skill attack-path-modeling --redact --restore --cache \
+  --fallback ollama --format md --out ./results/target-com/ai_attack_paths.md
+
+# Multi-stage defensive pipeline (deep-triage | purple-team | executive-pack) or validated JSON (--structured)
+s1shell ai analyze \
+  --input ./results/target-com/assess.json \
+  --pipeline purple-team --redact --restore --out ./results/target-com/purple_team.md
+
+s1shell ai analyze \
+  --input ./results/target-com/assess.json \
+  --skill pentest-report-writer --structured --local-only --provider ollama
+
+# Bounded read-only ReAct investigator (strictly allowlisted to 9 offline/passive tools, max 8 steps)
+s1shell ai investigate \
+  --input ./results/target-com \
+  --goal "Correlate detected EOL/CVE risks with passive RDAP & CT context and prioritize fixes" \
+  --max-steps 5 --redact --restore
+
+# Interactive multi-turn defensive copilot (/skill, /skills, /verify, /save, /exit)
+s1shell ai chat --input ./results/target-com/assess.json --skill zero-trust-hardening --redact --restore
 
 # 3. Compile custom combined executive HTML report from individual JSON artifacts
 s1shell report build \
@@ -621,9 +710,9 @@ s1shell audit verify
 | `s1shell remediate <assess.json>` | None (offline) | Deterministic stack-tailored hardening config generator |
 | `s1shell diff <base.json> <curr.json>` | None (offline) | Security posture drift detection & CI regression gate |
 | `s1shell report build` | None (offline) | Compile artifacts into JSON, Markdown, SARIF 2.1.0, or HTML |
-| `s1shell ai env \| analyze` | Configured AI endpoint (or local Ollama) | Manage `.env` credentials & redacted defensive AI analysis |
+| `s1shell ai env \| skills \| analyze \| investigate \| chat` | Configured AI endpoint (or `--local-only` Ollama) | Defensive AI skills library, multi-stage pipelines, reversible NDA redaction, grounding checks, read-only ReAct investigator & copilot |
 | `s1shell audit list \| verify` | None (offline) | Inspect & verify SHA-256 hash chain integrity of `audit.log` |
-| `s1shell mcp serve` | Offline / public intel only | Stdio JSON-RPC 2.0 MCP server exposing 19 strictly read-only tools |
+| `s1shell mcp serve \| config \| ping` | Online HTTP / Stdio (intel + AI; opt-in scoped targets) | Online Streamable HTTP & local stdio MCP server (22–25 tools, Resources, Prompts, Bearer auth, Origin guard), client config generator, & live ping |
 | `s1shell doctor` / `s1shell completion {bash,zsh,fish}` | None (offline) | Local environment diagnostics & shell tab-completion |
 
 </details>

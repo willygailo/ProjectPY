@@ -9,7 +9,8 @@ from typing import TextIO
 from rich.console import Console
 from rich.table import Table
 
-from s1shell.ai.models import AIAnalysisResult, AIEnvStatus
+from s1shell.ai.models import AIAnalysisResult, AIEnvStatus, AIInvestigationResult
+from s1shell.ai.skills import AISkill, AISkillsCatalog
 from s1shell.assess.models import (
     AssessmentDiffResult,
     AssessmentResult,
@@ -693,30 +694,216 @@ def render_ai_analysis(
     if norm == "json":
         write_or_print(dumps_json(result), out_file=out_file, stdout=stdout)
         return
+
+    meta_tags: list[str] = [f"mode={result.mode}"]
+    if result.skill:
+        meta_tags.append(f"skill={result.skill}")
+    if result.pipeline:
+        meta_tags.append(f"pipeline={result.pipeline}")
+    if result.cached:
+        meta_tags.append("cached=yes")
+    if result.fallback_used:
+        meta_tags.append(f"fallback={result.fallback_used}")
+    if result.redacted:
+        rest_str = ", restored" if result.restored else ""
+        meta_tags.append(f"redacted={result.redactions_applied}{rest_str}")
+
+    grounding_str = "—"
+    if result.grounding is not None:
+        g = result.grounding
+        score_txt = f"{g.grounding_score:.2f}" if g.grounding_score is not None else "n/a"
+        grounding_str = (
+            f"score={score_txt} (verified={len(g.verified_refs)}, "
+            f"ungrounded={len(g.ungrounded_refs)}) — {g.note}"
+        )
+
     if norm == "md":
         lines = [
             f"# S1shell AI Analysis ({result.provider} / {result.model})",
             "",
-            f"- **Mode:** `{result.mode}` | **Redacted:** `{'yes' if result.redacted else 'no'}`",
+            f"- **Execution:** `{' | '.join(meta_tags)}`",
             f"- **Task:** {result.task}",
             f"- **Artifacts:** {', '.join(result.input_artifacts) or 'none'}",
             f"- **Tokens:** input={result.input_tokens}, output={result.output_tokens}",
-            "",
-            result.analysis,
         ]
+        if result.grounding is not None:
+            lines.append(f"- **Grounding Verification:** {grounding_str}")
+        if result.injection_warnings:
+            lines.append(
+                f"- **Prompt-Injection Guardrails:** {len(result.injection_warnings)} pattern(s) "
+                f"neutralized ({'; '.join(result.injection_warnings[:3])})"
+            )
+        if result.pipeline_stages:
+            stages_txt = " -> ".join(s.stage for s in result.pipeline_stages)
+            lines.append(f"- **Pipeline Stages:** `{stages_txt}`")
+        lines.extend(["", result.analysis])
         write_or_print("\n".join(lines), out_file=out_file, stdout=stdout)
         return
 
     table = Table(title=f"S1shell AI Analysis ({result.provider} / {result.model})")
     table.add_column("Field", style="cyan", no_wrap=True)
     table.add_column("Value")
-    red_label = "yes" if result.redacted else "no"
-    table.add_row("Mode / Redacted", f"{result.mode} (redacted={red_label})")
+    table.add_row("Execution", " | ".join(meta_tags))
     table.add_row("Task", result.task)
-    table.add_row("Artifacts", ", ".join(result.input_artifacts) or "none")
     table.add_row("Tokens", f"in={result.input_tokens}, out={result.output_tokens}")
+    if result.pipeline_stages:
+        table.add_row("Pipeline", " -> ".join(s.stage for s in result.pipeline_stages))
+    if result.grounding is not None:
+        table.add_row("Grounding", grounding_str)
+    if result.injection_warnings:
+        table.add_row(
+            "Guardrails",
+            f"Neutralized {len(result.injection_warnings)} injection pattern(s)",
+        )
     table.add_row("Analysis", result.analysis)
     _emit_tables([table], console=console, out_file=out_file, stdout=stdout)
+
+
+def render_ai_skills_catalog(
+    catalog: AISkillsCatalog,
+    *,
+    fmt: str,
+    console: Console,
+    out_file: Path | None = None,
+    stdout: TextIO | None = None,
+) -> None:
+    """Render `s1shell ai skills list` in `table`, `json`, or `md`."""
+    norm = _require_format(fmt, ("table", "json", "md"), command="ai skills list")
+    if norm == "json":
+        write_or_print(dumps_json(catalog), out_file=out_file, stdout=stdout)
+        return
+    if norm == "md":
+        lines = [
+            f"# S1shell Defensive AI Skills ({len(catalog.skills)} loaded)",
+            "",
+            "| Skill ID | Category | Recommended Artifacts | Description |",
+            "|---|---|---|---|",
+        ]
+        for s in catalog.skills:
+            arts = ", ".join(s.recommended_artifacts) or "any"
+            lines.append(
+                f"| `{s.id}` | `{s.category}` | {_md_cell(arts)} | {_md_cell(s.description)} |"
+            )
+        write_or_print("\n".join(lines), out_file=out_file, stdout=stdout)
+        return
+
+    table = Table(title=f"S1shell Defensive AI Skills ({len(catalog.skills)} available)")
+    table.add_column("Skill ID", style="cyan", no_wrap=True)
+    table.add_column("Category", style="magenta", no_wrap=True)
+    table.add_column("Source", no_wrap=True)
+    table.add_column("Description")
+    for s in catalog.skills:
+        src = "bundled" if s.source == "bundled" else "custom"
+        table.add_row(s.id, s.category, src, s.description)
+    _emit_tables([table], console=console, out_file=out_file, stdout=stdout)
+
+
+def render_ai_skill_detail(
+    skill: AISkill,
+    *,
+    fmt: str,
+    console: Console,
+    out_file: Path | None = None,
+    stdout: TextIO | None = None,
+) -> None:
+    """Render `s1shell ai skills show <id>` in `table`, `json`, or `md`."""
+    norm = _require_format(fmt, ("table", "json", "md"), command="ai skills show")
+    if norm == "json":
+        write_or_print(dumps_json(skill), out_file=out_file, stdout=stdout)
+        return
+    if norm == "md":
+        lines = [
+            f"# AI Skill: {skill.name} (`{skill.id}`)",
+            "",
+            f"- **Category:** `{skill.category}` | **Source:** `{skill.source}`",
+            f"- **Recommended Artifacts:** {', '.join(skill.recommended_artifacts) or 'any'}",
+            f"- **Description:** {skill.description}",
+            "",
+            "## Output Sections",
+            *[f"- {sec}" for sec in skill.output_sections],
+            "",
+            "## System Instructions",
+            skill.system_prompt,
+        ]
+        write_or_print("\n".join(lines), out_file=out_file, stdout=stdout)
+        return
+
+    table = Table(title=f"AI Skill: {skill.name} ({skill.id})")
+    table.add_column("Field", style="cyan", no_wrap=True)
+    table.add_column("Value")
+    table.add_row("Category", skill.category)
+    table.add_row("Source", skill.source)
+    table.add_row("Artifacts", ", ".join(skill.recommended_artifacts) or "any")
+    table.add_row("Description", skill.description)
+    table.add_row("Output Sections", "\n".join(f"- {s}" for s in skill.output_sections) or "—")
+    table.add_row("System Prompt", skill.system_prompt)
+    _emit_tables([table], console=console, out_file=out_file, stdout=stdout)
+
+
+def render_ai_investigation(
+    result: AIInvestigationResult,
+    *,
+    fmt: str,
+    console: Console,
+    out_file: Path | None = None,
+    stdout: TextIO | None = None,
+) -> None:
+    """Render bounded read-only `s1shell ai investigate` results in `table`, `json`, or `md`."""
+    norm = _require_format(fmt, ("table", "json", "md"), command="ai investigate")
+    if norm == "json":
+        write_or_print(dumps_json(result), out_file=out_file, stdout=stdout)
+        return
+
+    g_txt = "—"
+    if result.grounding is not None:
+        sc = (
+            f"{result.grounding.grounding_score:.2f}"
+            if result.grounding.grounding_score is not None
+            else "n/a"
+        )
+        g_txt = f"score={sc} ({result.grounding.note})"
+
+    if norm == "md":
+        lines = [
+            f"# S1shell Read-Only AI Investigation ({result.provider} / {result.model})",
+            "",
+            f"- **Goal:** {result.goal}",
+            f"- **Steps Executed:** {len(result.steps)} | "
+            f"**Tokens:** in={result.input_tokens}, out={result.output_tokens}",
+            f"- **Grounding:** {g_txt}",
+            "",
+            "## Investigation Trace",
+        ]
+        for st in result.steps:
+            tool_part = f" → `{st.tool}`" if st.tool else " → `final`"
+            err_part = f" (error: {st.error})" if st.error else ""
+            lines.append(f"- **Step {st.step}**{tool_part}: {st.thought}{err_part}")
+        lines.extend(["", "## Final Defensive Brief", "", result.final_answer])
+        write_or_print("\n".join(lines), out_file=out_file, stdout=stdout)
+        return
+
+    summary = Table(title=f"S1shell AI Investigation ({result.provider} / {result.model})")
+    summary.add_column("Field", style="cyan", no_wrap=True)
+    summary.add_column("Value")
+    summary.add_row("Goal", result.goal)
+    summary.add_row("Steps", str(len(result.steps)))
+    summary.add_row("Tokens", f"in={result.input_tokens}, out={result.output_tokens}")
+    summary.add_row("Grounding", g_txt)
+    summary.add_row("Final Brief", result.final_answer)
+
+    trace = Table(title="Read-Only Tool Trace")
+    trace.add_column("#", no_wrap=True)
+    trace.add_column("Action", style="magenta", no_wrap=True)
+    trace.add_column("Thought")
+    trace.add_column("Status")
+    for st in result.steps:
+        trace.add_row(
+            str(st.step),
+            st.tool or "final",
+            st.thought[:100],
+            f"ERR: {st.error}" if st.error else "ok",
+        )
+    _emit_tables([summary, trace], console=console, out_file=out_file, stdout=stdout)
 
 
 def render_remediation_plan(
@@ -1649,4 +1836,56 @@ def render_codec_hash(
     tbl.add_column("Digest")
     for algo, digest in result.hashes.items():
         tbl.add_row(algo.upper(), digest)
+    _emit_tables([tbl], console=console, out_file=out_file, stdout=stdout)
+
+
+def render_mcp_ping(
+    result: dict[str, object],
+    *,
+    fmt: str,
+    console: Console,
+    out_file: Path | None = None,
+    stdout: TextIO | None = None,
+) -> None:
+    """Render `s1shell mcp ping` online MCP server connectivity results."""
+    norm = _require_format(fmt, ("table", "json", "md"), command="mcp ping")
+    if norm == "json":
+        write_or_print(dumps_json(result), out_file=out_file, stdout=stdout)
+        return
+    if norm == "md":
+        lines = [
+            f"# S1shell Online MCP Server Status (`{result.get('url', '')}`)",
+            "",
+            f"- **Healthy:** `{result.get('healthy')}` (`{result.get('latency_ms', 0)} ms`)",
+            (
+                f"- **Server:** `{result.get('server_name')}` "
+                f"`v{result.get('server_version')}` (MCP `{result.get('protocol_version')}`)"
+            ),
+            (
+                f"- **Capabilities:** `{result.get('tools_count', 0)}` tools · "
+                f"`{result.get('resources_count', 0)}` resources · "
+                f"`{result.get('prompts_count', 0)}` prompts"
+            ),
+            f"- **Scoped Targets Enabled:** `{result.get('scoped_targets_enabled')}`",
+            f"- **Bearer Auth Used:** `{result.get('auth_used')}`",
+        ]
+        write_or_print("\n".join(lines), out_file=out_file, stdout=stdout)
+        return
+
+    tbl = Table(title=f"S1shell Online MCP Status ({result.get('url', '')})")
+    tbl.add_column("Metric", style="cyan", no_wrap=True)
+    tbl.add_column("Value")
+    tbl.add_row("Status", f"ONLINE ({result.get('latency_ms', 0)} ms)")
+    tbl.add_row(
+        "Server",
+        (
+            f"{result.get('server_name')} v{result.get('server_version')} "
+            f"(MCP {result.get('protocol_version')})"
+        ),
+    )
+    tbl.add_row("Tools Exposed", str(result.get("tools_count", 0)))
+    tbl.add_row("Resources Exposed", str(result.get("resources_count", 0)))
+    tbl.add_row("Prompts (AI Skills)", str(result.get("prompts_count", 0)))
+    tbl.add_row("Scoped Targets Mode", str(result.get("scoped_targets_enabled", False)))
+    tbl.add_row("Bearer Auth Used", str(result.get("auth_used", False)))
     _emit_tables([tbl], console=console, out_file=out_file, stdout=stdout)
