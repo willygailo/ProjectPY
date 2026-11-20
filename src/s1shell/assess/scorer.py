@@ -10,6 +10,7 @@ from s1shell.errors import ValidationError
 from s1shell.fingerprint.models import FingerprintResult
 from s1shell.intel.models import IntelLookupResult
 from s1shell.profile.models import ProfileResult
+from s1shell.profile.tls_check import check_caa_issuer_alignment
 
 SUPPORTED_PRESETS = ("web", "api", "strict")
 
@@ -1257,6 +1258,316 @@ def evaluate_posture_with_suppressions(
                         asvs="V14.1.1",
                     )
                 )
+
+        rdap = intel.rdap
+        if rdap is not None and rdap.indicator_type == "domain":
+            if rdap.days_until_expiry is not None and rdap.days_until_expiry < 30:
+                rdap_sev = "HIGH" if rdap.days_until_expiry < 0 else "MEDIUM"
+                raw_findings.append(
+                    AssessmentFinding(
+                        id="INTEL-RDAP-EXPIRING",
+                        severity=rdap_sev,
+                        category="intel",
+                        title="Domain registration is expired or expiring within 30 days",
+                        evidence=(
+                            f"domain={rdap.indicator}, expires_at={rdap.expires_at or 'unknown'}, "
+                            f"days_until_expiry={rdap.days_until_expiry}"
+                        ),
+                        remediation=(
+                            "Renew the domain registration immediately and enable registrar "
+                            "auto-renewal to prevent domain hijacking."
+                        ),
+                        cwe="CWE-298",
+                        asvs="V14.1.1",
+                    )
+                )
+            if rdap.transfer_locked is False:
+                raw_findings.append(
+                    AssessmentFinding(
+                        id="INTEL-RDAP-UNLOCKED",
+                        severity="LOW",
+                        category="intel",
+                        title="Domain RDAP record lacks registrar transfer lock",
+                        evidence=(
+                            f"domain={rdap.indicator}, statuses={', '.join(rdap.statuses[:5])}"
+                        ),
+                        remediation=(
+                            "Enable `clientTransferProhibited` registrar lock to protect against "
+                            "unauthorized domain transfer."
+                        ),
+                        cwe="CWE-284",
+                        asvs="V14.1.1",
+                    )
+                )
+
+        us = intel.urlscan
+        if (
+            us is not None
+            and us.observed_ips
+            and profile.pinned_ip
+            and profile.pinned_ip not in us.observed_ips
+        ):
+            raw_findings.append(
+                AssessmentFinding(
+                    id="INTEL-ORIGIN-DRIFT",
+                    severity="INFO",
+                    category="intel",
+                    title="Live pinned IP differs from historical urlscan.io observed IPs",
+                    evidence=(
+                        f"live_ip={profile.pinned_ip}, "
+                        f"historical_ips={', '.join(us.observed_ips[:5])}"
+                    ),
+                    remediation=(
+                        "Confirm whether infrastructure migrated intentionally and verify that "
+                        "retired/direct-origin IPs cannot bypass CDN/WAF controls."
+                    ),
+                    cwe="CWE-200",
+                    asvs="V14.1.1",
+                )
+            )
+
+    # 12. Deep TLS Chain & CAA-vs-Issuer Alignment (v0.4.0)
+    if profile.tls is not None and profile.tls.applicable:
+        if profile.tls.chain_issues:
+            raw_findings.append(
+                AssessmentFinding(
+                    id="TLS-CHAIN",
+                    severity="MEDIUM",
+                    category="tls",
+                    title="TLS X.509 certificate chain configuration issue(s) detected",
+                    evidence="; ".join(profile.tls.chain_issues[:4]),
+                    remediation=(
+                        "Serve the complete leaf + intermediate CA chain in valid order with "
+                        "non-expiring SHA-256+ intermediates."
+                    ),
+                    cwe="CWE-295",
+                    asvs="V9.2.1",
+                )
+            )
+        caa_mismatches = check_caa_issuer_alignment(profile.dns.caa, profile.tls.issuer)
+        if caa_mismatches:
+            raw_findings.append(
+                AssessmentFinding(
+                    id="TLS-CAA-MISMATCH",
+                    severity="MEDIUM",
+                    category="tls",
+                    title="TLS leaf certificate issuer conflicts with DNS CAA policy",
+                    evidence="; ".join(caa_mismatches),
+                    remediation=(
+                        "Align DNS `CAA` `issue`/`issuewild` records with your authorized CA(s) "
+                        "or re-issue the certificate from an authorized CA."
+                    ),
+                    cwe="CWE-295",
+                    asvs="V9.2.1",
+                )
+            )
+
+    # 13. Deep Recursive SPF & Email Auth Hygiene (v0.4.0)
+    if profile.dns.spf_issues:
+        has_plus_all = any("+all" in msg for msg in profile.dns.spf_issues)
+        has_wide_cidr = any("IPv4 range" in msg for msg in profile.dns.spf_issues)
+        if has_plus_all or has_wide_cidr:
+            raw_findings.append(
+                AssessmentFinding(
+                    id="DNS-SPF-PERMISSIVE",
+                    severity="HIGH" if has_plus_all else "MEDIUM",
+                    category="dns",
+                    title="Overly permissive SPF record allows unauthorized mail senders",
+                    evidence="; ".join(
+                        m
+                        for m in profile.dns.spf_issues
+                        if "+all" in m or "?all" in m or "IPv4 range" in m
+                    )[:280],
+                    remediation=(
+                        "Replace `+all` / broad CIDRs with explicit authorized mail senders and "
+                        "end the SPF policy with `~all` or `-all`."
+                    ),
+                    cwe="CWE-290",
+                    asvs="V14.1.1",
+                )
+            )
+        rec_issues = [
+            m
+            for m in profile.dns.spf_issues
+            if "Recursive SPF" in m or "void/NXDOMAIN" in m or "loop" in m
+        ]
+        if rec_issues:
+            raw_findings.append(
+                AssessmentFinding(
+                    id="DNS-SPF-RECURSIVE",
+                    severity="MEDIUM",
+                    category="dns",
+                    title="Recursive SPF expansion violates RFC 7208 lookup or void limits",
+                    evidence="; ".join(rec_issues)[:280],
+                    remediation=(
+                        "Flatten nested SPF `include:` chains to stay at or below 10 cumulative "
+                        "DNS lookups and <= 2 void lookups to avoid PermError."
+                    ),
+                    cwe="CWE-290",
+                    asvs="V14.1.1",
+                )
+            )
+
+    # 14. RFC Well-Known OIDC & JWKS Audit (v0.4.0)
+    if profile.well_known is not None:
+        wk = profile.well_known
+        if wk.oidc_issues:
+            oidc_sev = (
+                "HIGH"
+                if any("plain HTTP" in i or "`none`" in i for i in wk.oidc_issues)
+                else "MEDIUM"
+            )
+            raw_findings.append(
+                AssessmentFinding(
+                    id="OIDC-001",
+                    severity=oidc_sev,
+                    category="well_known",
+                    title="Insecure OpenID Connect discovery metadata (`openid-configuration`)",
+                    evidence="; ".join(wk.oidc_issues[:4]),
+                    remediation=(
+                        "Enforce HTTPS on all OIDC endpoints, disable legacy implicit `token` "
+                        "flows and `alg: none`, and require PKCE `S256`."
+                    ),
+                    cwe="CWE-345",
+                    asvs="V3.5.3",
+                )
+            )
+        if wk.jwks_issues:
+            priv_issues = [i for i in wk.jwks_issues if "private key material" in i]
+            if priv_issues:
+                raw_findings.append(
+                    AssessmentFinding(
+                        id="JWKS-PRIV",
+                        severity="CRITICAL",
+                        category="well_known",
+                        title="Public JWKS endpoint exposes private key parameters",
+                        evidence="; ".join(priv_issues[:3]),
+                        remediation=(
+                            "Remove private key components (`d`, `p`, `q`, etc.) from public JWKS "
+                            "immediately and rotate all affected signing keys."
+                        ),
+                        cwe="CWE-321",
+                        asvs="V6.4.1",
+                    )
+                )
+            other_jwks = [i for i in wk.jwks_issues if "private key material" not in i]
+            if other_jwks:
+                raw_findings.append(
+                    AssessmentFinding(
+                        id="JWKS-WEAK",
+                        severity="HIGH",
+                        category="well_known",
+                        title="Weak cryptographic key or algorithm advertised in public JWKS",
+                        evidence="; ".join(other_jwks[:4]),
+                        remediation=(
+                            "Rotate JWKS keys to >=2048-bit RSA or Ed25519/ES256 and disallow "
+                            "`alg: none`."
+                        ),
+                        cwe="CWE-326",
+                        asvs="V6.2.1",
+                    )
+                )
+
+    # 15. Zero-Extra-Packet Passive Exposures: Secrets, JWTs, Source Maps, Stack Traces (v0.4.0)
+    if profile.html is not None and profile.html.analyzed:
+        h = profile.html
+        if h.leaked_secrets:
+            has_pem = any(item.get("type") == "private_key_pem" for item in h.leaked_secrets)
+            previews = ", ".join(
+                f"{item.get('type')}={item.get('redacted_preview')}"
+                for item in h.leaked_secrets[:4]
+            )
+            raw_findings.append(
+                AssessmentFinding(
+                    id="LEAK-SECRET",
+                    severity="CRITICAL" if has_pem else "HIGH",
+                    category="disclosure",
+                    title=(
+                        f"Potential credential/secret exposure in public HTTP response "
+                        f"({len(h.leaked_secrets)} match(es))"
+                    ),
+                    evidence=f"Redacted previews: {previews}",
+                    remediation=(
+                        "Revoke and rotate exposed credentials immediately; never embed secrets, "
+                        "API keys, or database URIs in client-delivered HTML/JS."
+                    ),
+                    cwe="CWE-798",
+                    asvs="V14.3.3",
+                )
+            )
+        jwt_issues = [
+            f"{j.get('location')} (alg={j.get('alg')}): {'; '.join(j.get('issues', []))}"
+            for j in h.passive_jwts
+            if j.get("issues")
+        ]
+        if jwt_issues:
+            has_none = any("alg:none" in msg for msg in jwt_issues)
+            raw_findings.append(
+                AssessmentFinding(
+                    id="LEAK-JWT",
+                    severity="HIGH" if has_none else "MEDIUM",
+                    category="disclosure",
+                    title="Insecure JWT detected passively in HTTP response",
+                    evidence="; ".join(jwt_issues[:3])[:280],
+                    remediation=(
+                        "Enforce strong JWT signing algorithms (RS256/ES256/EdDSA), short `exp` "
+                        "lifetimes, and avoid sensitive claims or HTML/URL token exposure."
+                    ),
+                    cwe="CWE-347",
+                    asvs="V3.5.3",
+                )
+            )
+        if h.source_maps:
+            raw_findings.append(
+                AssessmentFinding(
+                    id="LEAK-SOURCEMAP",
+                    severity="LOW",
+                    category="disclosure",
+                    title="JavaScript source-map reference exposed in HTML response",
+                    evidence=f"sourceMappingURL: {', '.join(h.source_maps[:4])}",
+                    remediation=(
+                        "Strip `sourceMappingURL` comments and restrict `.map` artifacts from "
+                        "public production web roots."
+                    ),
+                    cwe="CWE-540",
+                    asvs="V14.3.3",
+                )
+            )
+        if h.stack_traces:
+            raw_findings.append(
+                AssessmentFinding(
+                    id="LEAK-TRACE",
+                    severity="MEDIUM",
+                    category="disclosure",
+                    title="Application stack trace or debug error page exposed",
+                    evidence=f"Detected debug signatures: {', '.join(h.stack_traces)}",
+                    remediation=(
+                        "Disable production debug mode and serve generic error pages while "
+                        "logging stack traces only server-side."
+                    ),
+                    cwe="CWE-209",
+                    asvs="V7.4.1",
+                )
+            )
+
+    # 16. Offline End-of-Life (EOL) Software Detection (v0.4.0)
+    eol_matches = [m for m in fingerprint.matches if m.eol]
+    if eol_matches:
+        eol_summary = "; ".join(f"{m.product} {m.version}" for m in eol_matches[:5])
+        recs = "; ".join(dict.fromkeys(m.eol_recommended for m in eol_matches if m.eol_recommended))
+        raw_findings.append(
+            AssessmentFinding(
+                id="EOL-001",
+                severity="HIGH",
+                category="cve",
+                title=f"Detected {len(eol_matches)} End-of-Life (EOL) software component(s)",
+                evidence=f"EOL versions: {eol_summary}",
+                remediation=recs
+                or "Upgrade End-of-Life components to actively supported releases.",
+                cwe="CWE-1104",
+                asvs="V14.2.1",
+            )
+        )
 
     # Enrich with OWASP/NIST compliance tags and apply preset / suppression waivers.
     ignore_upper = {fid.strip().upper() for fid in (ignore_findings or set()) if fid.strip()}

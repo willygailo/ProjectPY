@@ -200,6 +200,36 @@ TOOLS_SPEC: list[dict[str, Any]] = [
         ),
         "inputSchema": {"type": "object", "properties": {}},
     },
+    {
+        "name": "s1shell_intel_ct",
+        "description": (
+            "Query passive Certificate Transparency logs (crt.sh) for a domain "
+            "(zero target contact)."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "domain": {"type": "string"},
+                "offline": {"type": "boolean"},
+            },
+            "required": ["domain"],
+        },
+    },
+    {
+        "name": "s1shell_intel_rdap",
+        "description": (
+            "Query public RFC 7480-7484 RDAP registration records for a domain or IP "
+            "(zero target contact, no API key required)."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "indicator": {"type": "string"},
+                "offline": {"type": "boolean"},
+            },
+            "required": ["indicator"],
+        },
+    },
 ]
 
 
@@ -282,8 +312,9 @@ class S1ShellMCPServer:
             return dumps_json(res)
         if name == "s1shell_cve_audit":
             fpath = Path(str(arguments.get("file_path", "")))
-            dep_res = self.dep_audit_service.audit_file(
+            dep_res = self.dep_audit_service.audit_path(
                 fpath,
+                recursive=bool(arguments.get("recursive", False)),
                 offline=bool(arguments.get("offline", False)),
                 enrich=bool(arguments.get("enrich", False)),
                 kev_only=bool(arguments.get("kev_only", False)),
@@ -316,6 +347,18 @@ class S1ShellMCPServer:
                 offline=bool(arguments.get("offline", False)),
             )
             return dumps_json(adv_res)
+        if name == "s1shell_intel_ct":
+            ct_res = self.intel_service.ct_lookup(
+                str(arguments.get("domain", "")),
+                offline=bool(arguments.get("offline", False)),
+            )
+            return dumps_json(ct_res)
+        if name == "s1shell_intel_rdap":
+            rdap_res = self.intel_service.rdap_lookup(
+                str(arguments.get("indicator", "")),
+                offline=bool(arguments.get("offline", False)),
+            )
+            return dumps_json(rdap_res)
         if name == "s1shell_audit_list":
             events = self.audit_logger.read_recent(
                 limit=int(arguments.get("limit", 50)),

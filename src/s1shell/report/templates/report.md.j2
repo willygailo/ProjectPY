@@ -151,6 +151,9 @@ _No passive technology signatures matched._
 {% endif -%}
 {% if it.get("urlscan") -%}
 - **urlscan.io (Passive):** total_results={{ it.urlscan.total_results }}{% if it.urlscan.get("observed_servers") %}, servers=`{{ it.urlscan.observed_servers | join(", ") }}`{% endif %}
+{% endif -%}
+{% if it.get("rdap") -%}
+- **RDAP ({{ it.rdap.indicator_type }}):** registrar=`{{ it.rdap.get("registrar") or "—" }}`, expires=`{{ it.rdap.get("expires_at") or "—" }}`, locked=`{{ it.rdap.get("transfer_locked") }}`
 {% endif %}
 {% endfor %}
 {% endif %}

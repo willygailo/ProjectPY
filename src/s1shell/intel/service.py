@@ -7,6 +7,7 @@ import ipaddress
 import json
 import time
 from collections.abc import Sequence
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -21,27 +22,34 @@ from s1shell.config import (
 from s1shell.cve.cache import CVECache
 from s1shell.errors import ExitCode, NetworkError, ValidationError
 from s1shell.intel.clients import (
+    CrtShClient,
     GitHubAdvisoryClient,
     GreyNoiseClient,
+    RDAPClient,
     URLScanClient,
     VirusTotalClient,
+    parse_crtsh_payload,
     parse_github_advisories_payload,
     parse_greynoise_payload,
+    parse_rdap_payload,
     parse_urlscan_payload,
     parse_virustotal_payload,
 )
 from s1shell.intel.models import (
+    CTLookupResult,
     GitHubAdvisoryResult,
     GreyNoiseIntel,
     IntelEnvStatus,
     IntelFeedKeyStatus,
     IntelLookupResult,
+    RDAPLookupResult,
     URLScanSummary,
     VirusTotalIntel,
 )
 from s1shell.scope import parse_target
 
-SUPPORTED_INTEL_SOURCES = ("vt", "greynoise", "urlscan")
+DEFAULT_INTEL_LOOKUP_SOURCES = ("vt", "greynoise", "urlscan")
+SUPPORTED_INTEL_SOURCES = ("vt", "greynoise", "urlscan", "rdap")
 
 
 def _cache_key(prefix: str, payload: dict[str, Any]) -> str:
@@ -76,6 +84,8 @@ class IntelService:
         greynoise_client: GreyNoiseClient | None = None,
         urlscan_client: URLScanClient | None = None,
         github_client: GitHubAdvisoryClient | None = None,
+        crtsh_client: CrtShClient | None = None,
+        rdap_client: RDAPClient | None = None,
         audit_logger: AuditLogger | None = None,
     ) -> None:
         self.cfg = cfg
@@ -88,6 +98,8 @@ class IntelService:
         self.github_client = (
             github_client if github_client is not None else GitHubAdvisoryClient(cfg)
         )
+        self.crtsh_client = crtsh_client if crtsh_client is not None else CrtShClient(cfg)
+        self.rdap_client = rdap_client if rdap_client is not None else RDAPClient(cfg)
         self.audit_logger = audit_logger if audit_logger is not None else AuditLogger(cfg.audit_log)
 
     @property
@@ -228,7 +240,7 @@ class IntelService:
         requested = (
             [s.strip().lower() for s in sources if s.strip()]
             if sources
-            else list(SUPPORTED_INTEL_SOURCES)
+            else list(DEFAULT_INTEL_LOOKUP_SOURCES)
         )
         for src in requested:
             if src not in SUPPORTED_INTEL_SOURCES:
@@ -240,6 +252,7 @@ class IntelService:
         vt_res: VirusTotalIntel | None = None
         gn_res: GreyNoiseIntel | None = None
         us_res: URLScanSummary | None = None
+        rdap_res: RDAPLookupResult | None = None
         warnings: list[str] = []
         queried: list[str] = []
         all_cached = True
@@ -353,6 +366,15 @@ class IntelService:
                         error=str(exc),
                     )
 
+        # 4. RFC 7480–7484 RDAP registration lookup (zero API key)
+        if "rdap" in requested:
+            try:
+                rdap_res = self.rdap_lookup(indicator, offline=offline, refresh=refresh)
+                queried.append("rdap")
+                all_cached = all_cached and rdap_res.cached
+            except NetworkError as exc:
+                warnings.append(f"rdap: {exc}")
+
         return IntelLookupResult(
             indicator=indicator,
             indicator_type=ind_type,
@@ -362,7 +384,106 @@ class IntelService:
             virustotal=vt_res,
             greynoise=gn_res,
             urlscan=us_res,
+            rdap=rdap_res,
             warnings=warnings,
+        )
+
+    def ct_lookup(
+        self,
+        raw_domain: str,
+        *,
+        offline: bool = False,
+        refresh: bool = False,
+        export_candidates: Path | None = None,
+    ) -> CTLookupResult:
+        """Query passive Certificate Transparency logs via crt.sh (zero target contact)."""
+        parsed = parse_target(raw_domain)
+        if parsed.is_ip:
+            raise ValidationError("`intel ct` requires a domain name, not an IP address.")
+        domain = parsed.host.lower().rstrip(".")
+        cache_k = _cache_key("ct", {"domain": domain})
+        cached = False
+        raw: Any = (
+            None if refresh else self.cache.get(cache_k, ttl_seconds=self.cfg.cve_cache_ttl_seconds)
+        )
+        if isinstance(raw, list):
+            cached = True
+        else:
+            if offline:
+                raise NetworkError(f"Cache miss in --offline mode for CT log lookup '{domain}'.")
+            started = time.monotonic()
+            try:
+                raw = self.crtsh_client.fetch_domain(domain)
+                self.cache.set(cache_k, raw)
+                self._log_intel("intel ct", domain, "success", 0, started)
+            except Exception as exc:
+                self._log_intel(
+                    "intel ct",
+                    domain,
+                    "error",
+                    int(ExitCode.ERROR),
+                    started,
+                    error=str(exc),
+                )
+                raise
+
+        res = parse_crtsh_payload(raw, domain=domain, cached=cached)
+        if export_candidates is not None:
+            out_path = export_candidates.expanduser().resolve()
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            lines = [
+                f"# Passive Certificate Transparency candidates for {domain}",
+                "# Review and authorize before importing with `s1shell scope import`.",
+                *res.unique_subdomains,
+            ]
+            out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            res = replace(res, exported_candidates_file=str(out_path))
+        return res
+
+    def rdap_lookup(
+        self,
+        raw_indicator: str,
+        *,
+        offline: bool = False,
+        refresh: bool = False,
+    ) -> RDAPLookupResult:
+        """Query RFC 7480–7484 RDAP registration data for a domain or IP (zero target contact)."""
+        parsed = parse_target(raw_indicator)
+        indicator = parsed.host.lower().rstrip(".")
+        ind_type = "ip" if parsed.is_ip else "domain"
+        cache_k = _cache_key("rdap", {"type": ind_type, "indicator": indicator})
+        cached = False
+        cached_blob: Any = (
+            None if refresh else self.cache.get(cache_k, ttl_seconds=self.cfg.cve_cache_ttl_seconds)
+        )
+        if isinstance(cached_blob, dict) and isinstance(cached_blob.get("payload"), dict):
+            cached = True
+            payload = cached_blob["payload"]
+            source_url = str(cached_blob.get("source_url") or "") or None
+        else:
+            if offline:
+                raise NetworkError(f"Cache miss in --offline mode for RDAP lookup '{indicator}'.")
+            started = time.monotonic()
+            try:
+                payload, source_url = self.rdap_client.fetch(indicator, indicator_type=ind_type)
+                self.cache.set(cache_k, {"payload": payload, "source_url": source_url})
+                self._log_intel("intel rdap", indicator, "success", 0, started)
+            except Exception as exc:
+                self._log_intel(
+                    "intel rdap",
+                    indicator,
+                    "error",
+                    int(ExitCode.ERROR),
+                    started,
+                    error=str(exc),
+                )
+                raise
+        return parse_rdap_payload(
+            payload,
+            indicator=indicator,
+            indicator_type=ind_type,
+            source_url=source_url,
+            cached=cached,
         )
 
     def advisories(

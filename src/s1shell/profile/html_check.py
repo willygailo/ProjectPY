@@ -2,14 +2,170 @@
 
 from __future__ import annotations
 
+import base64
 import contextlib
+import json
 import re
+from datetime import datetime, timezone
 from html.parser import HTMLParser
+from typing import Any
 from urllib.parse import urlsplit
 
 from s1shell.profile.models import HTMLPassiveAnalysis
 
 _MAX_PARSE_BYTES = 512 * 1024  # Cap HTML DOM parse at 512 KiB for speed & safety
+
+_SECRET_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("aws_access_key", re.compile(r"\b(AKIA[0-9A-Z]{16})\b")),
+    ("gcp_api_key", re.compile(r"\b(AIza[0-9A-Za-z_-]{35})\b")),
+    ("github_token", re.compile(r"\b(gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\b")),
+    ("stripe_live_key", re.compile(r"\b(sk_live_[0-9a-zA-Z]{16,})\b")),
+    ("slack_token", re.compile(r"\b(xox[baprs]-[0-9A-Za-z-]{10,})\b")),
+    ("private_key_pem", re.compile(r"(-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----)")),
+    (
+        "db_credentials_uri",
+        re.compile(
+            r"\b((?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis)://[^/\s:@]+:[^/\s@]+@[^\s\"'<>]+)"
+        ),
+    ),
+)
+
+_JWT_RE = re.compile(
+    r"\b(eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]*)(?![A-Za-z0-9_-])"
+)
+_SOURCEMAP_RE = re.compile(r"//#\s*sourceMappingURL\s*=\s*([^\s'\"<>]+)", re.IGNORECASE)
+_STACK_TRACE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("python_traceback", re.compile(r"Traceback \(most recent call last\):")),
+    (
+        "php_fatal_error",
+        re.compile(r"<b>(?:Fatal error|Warning|Parse error)</b>:\s+.+?\s+in\s+<b>/"),
+    ),
+    (
+        "django_debug",
+        re.compile(r"You're seeing this error because you have <code>DEBUG = True</code>"),
+    ),
+    ("laravel_whoops", re.compile(r"Whoops! There was an error\.|Ignition\\Exceptions")),
+    (
+        "java_stack_trace",
+        re.compile(
+            r"\b(?:java\.lang\.\w+Exception|org\.springframework\.\w+Exception)\b.*\n\s+at\s+"
+        ),
+    ),
+    ("aspnet_error", re.compile(r"Server Error in '/' Application\.")),
+)
+
+
+def _redact_secret(raw: str) -> str:
+    s = raw.strip()
+    if "PRIVATE KEY" in s:
+        return "-----BEGIN PRIVATE KEY----- [REDACTED]"
+    if "://" in s and "@" in s:
+        scheme, rest = s.split("://", 1)
+        host_part = rest.rsplit("@", 1)[-1]
+        return f"{scheme}://***:***@{host_part[:40]}"
+    if len(s) <= 10:
+        return "***"
+    return f"{s[:4]}****{s[-4:]}"
+
+
+def _decode_jwt_segment(seg: str) -> dict[str, Any] | None:
+    padded = seg + "=" * ((4 - len(seg) % 4) % 4)
+    try:
+        raw = base64.urlsafe_b64decode(padded.encode("ascii"))
+        obj = json.loads(raw.decode("utf-8"))
+        return obj if isinstance(obj, dict) else None
+    except Exception:
+        return None
+
+
+def inspect_passive_jwt(token: str, *, location: str) -> dict[str, Any] | None:
+    """Passively inspect JWT header & claims (zero cracking/tampering; never returns raw token)."""
+    parts = token.split(".")
+    if len(parts) != 3:
+        return None
+    hdr = _decode_jwt_segment(parts[0])
+    payload = _decode_jwt_segment(parts[1])
+    if hdr is None or payload is None:
+        return None
+    alg = str(hdr.get("alg") or "unknown")
+    issues: list[str] = []
+    if alg.lower() == "none" or not parts[2]:
+        issues.append("JWT uses alg:none or unsigned empty signature")
+    exp = payload.get("exp")
+    iat = payload.get("iat")
+    if exp is None:
+        issues.append("JWT missing `exp` expiration claim")
+    elif isinstance(exp, (int, float)):
+        now_ts = datetime.now(timezone.utc).timestamp()
+        if isinstance(iat, (int, float)) and (exp - iat) > 30 * 86400:
+            issues.append(f"JWT lifetime exceeds 30 days ({int((exp - iat) // 86400)}d)")
+        elif exp < now_ts:
+            issues.append("JWT is already expired")
+    sensitive_keys = [
+        k for k in ("password", "secret", "ssn", "credit_card", "api_key") if k in payload
+    ]
+    if sensitive_keys:
+        issues.append(f"JWT payload contains sensitive claim keys ({', '.join(sensitive_keys)})")
+    return {
+        "location": location,
+        "alg": alg,
+        "typ": str(hdr.get("typ") or "JWT"),
+        "has_exp": exp is not None,
+        "claim_keys": sorted(str(k) for k in payload)[:12],
+        "issues": issues,
+    }
+
+
+def scan_passive_exposures(
+    text: str,
+    headers: list[tuple[str, str]],
+) -> tuple[list[dict[str, str]], list[dict[str, Any]], list[str], list[str]]:
+    """Zero-extra-packet passive scan for redacted secrets, JWTs, source maps, & stack traces."""
+    leaked_secrets: list[dict[str, str]] = []
+    seen_secrets: set[tuple[str, str]] = set()
+    for kind, pat in _SECRET_PATTERNS:
+        for m in pat.finditer(text):
+            preview = _redact_secret(m.group(1))
+            key = (kind, preview)
+            if key not in seen_secrets and len(leaked_secrets) < 10:
+                seen_secrets.add(key)
+                leaked_secrets.append(
+                    {"type": kind, "redacted_preview": preview, "location": "html"}
+                )
+
+    passive_jwts: list[dict[str, Any]] = []
+    seen_jwts: set[str] = set()
+    for m in _JWT_RE.finditer(text):
+        tok = m.group(1)
+        if tok not in seen_jwts and len(passive_jwts) < 8:
+            seen_jwts.add(tok)
+            info = inspect_passive_jwt(tok, location="html")
+            if info is not None:
+                passive_jwts.append(info)
+    for h_name, h_val in headers:
+        low_h = h_name.lower()
+        if low_h in {"set-cookie", "location", "authorization"}:
+            for m in _JWT_RE.finditer(h_val):
+                tok = m.group(1)
+                if tok not in seen_jwts and len(passive_jwts) < 8:
+                    seen_jwts.add(tok)
+                    info = inspect_passive_jwt(tok, location=f"header:{low_h}")
+                    if info is not None:
+                        passive_jwts.append(info)
+
+    source_maps: list[str] = []
+    for m in _SOURCEMAP_RE.finditer(text):
+        sm = m.group(1).strip()[:160]
+        if sm and sm not in source_maps and len(source_maps) < 10:
+            source_maps.append(sm)
+
+    stack_traces: list[str] = []
+    for kind, pat in _STACK_TRACE_PATTERNS:
+        if pat.search(text) and kind not in stack_traces:
+            stack_traces.append(kind)
+
+    return leaked_secrets, passive_jwts, source_maps, stack_traces
+
 
 _LIB_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("jquery", re.compile(r"jquery[-/.@](\d+\.\d+(?:\.\d+)?)", re.IGNORECASE)),
@@ -274,6 +430,8 @@ def analyze_html_body(
     if ("Drupal.settings" in text or "drupal-settings-json" in text) and "drupal" not in hints:
         hints.append("drupal")
 
+    leaked_secrets, passive_jwts, source_maps, stack_traces = scan_passive_exposures(text, headers)
+
     return HTMLPassiveAnalysis(
         analyzed=True,
         title=parser.title,
@@ -288,4 +446,8 @@ def analyze_html_body(
         third_party_origins=parser.third_party_origins,
         inline_script_count=parser.inline_script_count,
         unsafe_blank_links=parser.unsafe_blank_links,
+        leaked_secrets=leaked_secrets,
+        passive_jwts=passive_jwts,
+        source_maps=source_maps,
+        stack_traces=stack_traces,
     )

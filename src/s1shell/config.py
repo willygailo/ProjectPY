@@ -32,6 +32,8 @@ DEFAULT_GITHUB_ADVISORIES_URL = "https://api.github.com/advisories"
 DEFAULT_VIRUSTOTAL_API_URL = "https://www.virustotal.com/api/v3"
 DEFAULT_GREYNOISE_API_URL = "https://api.greynoise.io/v3/community"
 DEFAULT_URLSCAN_API_URL = "https://urlscan.io/api/v1/search/"
+DEFAULT_CRTSH_API_URL = "https://crt.sh/"
+DEFAULT_RDAP_BASE_URL = "https://rdap.org"
 SUPPORTED_AI_PROVIDERS = ("anthropic", "ollama", "openai_compat", "gemini")
 
 
@@ -140,6 +142,8 @@ class RuntimeConfig:
     virustotal_api_url: str = DEFAULT_VIRUSTOTAL_API_URL
     greynoise_api_url: str = DEFAULT_GREYNOISE_API_URL
     urlscan_api_url: str = DEFAULT_URLSCAN_API_URL
+    crtsh_api_url: str = DEFAULT_CRTSH_API_URL
+    rdap_base_url: str = DEFAULT_RDAP_BASE_URL
 
     @classmethod
     def from_env(

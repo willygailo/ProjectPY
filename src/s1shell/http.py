@@ -148,14 +148,15 @@ def build_intel_client(
     cfg: RuntimeConfig,
     *,
     transport: httpx.BaseTransport | None = None,
+    follow_redirects: bool = False,
 ) -> httpx.Client:
-    """Create a conservative httpx client for public vulnerability intel APIs."""
+    """Create a conservative httpx client for public vulnerability & OSINT intel APIs."""
     return httpx.Client(
         transport=transport,
         headers={"User-Agent": cfg.user_agent, "Accept": "application/json"},
         timeout=httpx.Timeout(cfg.timeout_seconds),
-        follow_redirects=False,
-        max_redirects=0,
+        follow_redirects=follow_redirects,
+        max_redirects=3 if follow_redirects else 0,
         http2=True,
     )
 

@@ -43,18 +43,165 @@ _MULTI_PART_TLDS = {
     "org.uk",
     "gov.uk",
     "ac.uk",
+    "nhs.uk",
+    "police.uk",
     "com.au",
     "net.au",
     "org.au",
+    "edu.au",
+    "gov.au",
     "co.jp",
+    "or.jp",
+    "ne.jp",
+    "go.jp",
+    "ac.jp",
     "co.nz",
+    "org.nz",
+    "govt.nz",
     "com.br",
+    "org.br",
+    "gov.br",
     "com.sg",
+    "org.sg",
+    "gov.sg",
     "com.hk",
+    "org.hk",
+    "gov.hk",
     "co.in",
+    "org.in",
+    "gov.in",
     "co.kr",
+    "or.kr",
+    "go.kr",
     "com.ph",
+    "org.ph",
+    "net.ph",
+    "gov.ph",
+    "edu.ph",
+    "co.id",
+    "or.id",
+    "ac.id",
+    "go.id",
+    "com.my",
+    "org.my",
+    "gov.my",
+    "com.vn",
+    "org.vn",
+    "gov.vn",
+    "co.th",
+    "or.th",
+    "go.th",
+    "co.za",
+    "org.za",
+    "gov.za",
+    "com.mx",
+    "org.mx",
+    "gob.mx",
+    "com.ar",
+    "com.co",
+    "com.pe",
+    "com.tw",
+    "org.tw",
+    "gov.tw",
+    "com.cn",
+    "net.cn",
+    "org.cn",
+    "gov.cn",
+    "co.il",
+    "com.tr",
+    "com.ua",
+    "com.pl",
+    "com.es",
 }
+
+_SPF_WIDE_CIDR_RE = re.compile(r"^[+]?ip4:([^/\s]+)/(\d+)$", re.IGNORECASE)
+
+
+def analyze_spf_recursive(
+    client: RecordResolver,
+    root_domain: str,
+    spf_record: str,
+    *,
+    timeout: float = 5.0,
+    max_depth: int = 5,
+    max_queries: int = 15,
+) -> tuple[int, int, list[str]]:
+    """Bounded RFC 7208 recursive SPF `include:`/`redirect=` expansion.
+
+    Returns `(cumulative_lookups, void_lookups, issues)`.
+    """
+    issues: list[str] = []
+    visited: set[str] = {root_domain.lower().rstrip(".")}
+    queries_used = 0
+    void_lookups = 0
+    total_lookups = 0
+
+    def _inspect_record(record: str, domain: str, depth: int) -> None:
+        nonlocal queries_used, void_lookups, total_lookups
+        tokens = record.split()
+        for tok in tokens:
+            low = tok.lower()
+            if depth == 0:
+                if low == "+all" or low == "all":
+                    if "SPF uses `+all` (authorizes any IP worldwide to spoof email)" not in issues:
+                        issues.append(
+                            "SPF uses `+all` (authorizes any IP worldwide to spoof email)"
+                        )
+                elif low == "?all" and (
+                    "SPF uses neutral `?all` (does not reject unauthorized senders)" not in issues
+                ):
+                    issues.append("SPF uses neutral `?all` (does not reject unauthorized senders)")
+                cidr_m = _SPF_WIDE_CIDR_RE.match(tok)
+                if cidr_m:
+                    prefix_len = int(cidr_m.group(2))
+                    if prefix_len <= 15:
+                        issues.append(
+                            f"SPF authorizes overly broad IPv4 range `{tok}` (/{prefix_len})"
+                        )
+
+            if not _SPF_LOOKUP_TOKEN_RE.match(tok):
+                continue
+            total_lookups += 1
+
+            stripped = tok.lstrip("+-~?")
+            s_low = stripped.lower()
+            child_dom: str | None = None
+            if s_low.startswith("include:"):
+                child_dom = stripped.split(":", 1)[1].strip().rstrip(".")
+            elif s_low.startswith("redirect="):
+                child_dom = stripped.split("=", 1)[1].strip().rstrip(".")
+
+            if not child_dom:
+                continue
+            child_low = child_dom.lower()
+            if child_low in visited:
+                msg = f"SPF recursive loop detected via `{child_low}`"
+                if msg not in issues:
+                    issues.append(msg)
+                continue
+            if depth >= max_depth or queries_used >= max_queries:
+                continue
+            visited.add(child_low)
+            queries_used += 1
+            err_bucket: list[str] = []
+            txts, is_nx = _safe_resolve(client, child_low, "TXT", timeout, err_bucket)
+            child_spf = next(
+                (_unquote_txt(t) for t in txts if _unquote_txt(t).lower().startswith("v=spf1")),
+                None,
+            )
+            if is_nx or child_spf is None:
+                void_lookups += 1
+                continue
+            _inspect_record(child_spf, child_low, depth + 1)
+
+    _inspect_record(spf_record, root_domain, 0)
+    if total_lookups > 10:
+        issues.append(
+            f"Recursive SPF requires {total_lookups} DNS lookups (RFC 7208 max is 10 -> PermError)"
+        )
+    if void_lookups > 2:
+        issues.append(f"SPF triggers {void_lookups} void/NXDOMAIN lookups (RFC 7208 max is 2)")
+    return total_lookups, void_lookups, issues
 
 
 class RecordResolver(Protocol):
@@ -190,6 +337,12 @@ def collect_dns_records(
         (_unquote_txt(r) for r in tls_rpt_raw if _unquote_txt(r).lower().startswith("v=tlsrptv1")),
         None,
     )
+    bimi_raw, _ = _safe_resolve(client, f"default._bimi.{host}", "TXT", timeout, sec_errors)
+    bimi = next(
+        (_unquote_txt(r) for r in bimi_raw if _unquote_txt(r).lower().startswith("v=bimi1")),
+        None,
+    )
+    tlsa_records, _ = _safe_resolve(client, f"_443._tcp.{host}", "TLSA", timeout, sec_errors)
 
     ds_records, _ = _safe_resolve(client, host, "DS", timeout, sec_errors)
     dnskey_records, _ = _safe_resolve(client, host, "DNSKEY", timeout, sec_errors)
@@ -257,6 +410,19 @@ def collect_dns_records(
             if (a_nx or aaaa_nx) and not a_vals and not aaaa_vals:
                 dangling_cnames.append(low_target)
 
+    spf_direct = count_spf_lookups(spf) if spf else None
+    spf_recursive: int | None = None
+    spf_voids = 0
+    spf_issues: list[str] = []
+    if spf:
+        spf_root = used_apex if used_apex else host
+        spf_recursive, spf_voids, spf_issues = analyze_spf_recursive(
+            client,
+            spf_root,
+            spf,
+            timeout=timeout,
+        )
+
     return DNSRecords(
         a=records["A"],
         aaaa=records["AAAA"],
@@ -267,11 +433,16 @@ def collect_dns_records(
         caa=caa_records,
         txt=txt_clean,
         spf=spf,
-        spf_lookup_count=count_spf_lookups(spf) if spf else None,
+        spf_lookup_count=spf_direct,
+        spf_recursive_lookups=spf_recursive,
+        spf_void_lookups=spf_voids,
+        spf_issues=spf_issues,
         dmarc=dmarc,
         dmarc_policy=parse_dmarc_policy(dmarc) if dmarc else None,
         mta_sts=mta_sts,
         tls_rpt=tls_rpt,
+        bimi=bimi,
+        tlsa=tlsa_records,
         dnssec_present=dnssec_present,
         dangling_cnames=dangling_cnames,
         apex_domain=used_apex,

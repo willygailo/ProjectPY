@@ -1,11 +1,15 @@
-"""Opt-in passive review of `security.txt`, `/robots.txt`, and HTTP `OPTIONS` methods."""
+"""Opt-in passive review of RFC well-known metadata (`security.txt`, OIDC, JWKS, OPTIONS)."""
 
 from __future__ import annotations
 
+import base64
+import contextlib
+import json
 import ssl
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import Any
 
 import httpx
 
@@ -202,6 +206,73 @@ def inspect_http_methods(
     return parse_allowed_methods(resp.headers)
 
 
+def parse_oidc_configuration(payload: dict[str, Any]) -> tuple[str | None, list[str]]:
+    """Passively audit `/.well-known/openid-configuration` metadata for weak auth settings."""
+    issuer = str(payload.get("issuer") or "").strip() or None
+    issues: list[str] = []
+    if issuer and issuer.lower().startswith("http://"):
+        issues.append("OIDC issuer uses plain HTTP instead of HTTPS")
+    for field_name in (
+        "authorization_endpoint",
+        "token_endpoint",
+        "jwks_uri",
+        "userinfo_endpoint",
+    ):
+        val = str(payload.get(field_name) or "").strip()
+        if val.lower().startswith("http://"):
+            issues.append(f"OIDC `{field_name}` uses plain HTTP")
+
+    resp_types = [str(r).strip().lower() for r in payload.get("response_types_supported", []) or []]
+    if any("token" in rt for rt in resp_types):
+        issues.append(
+            "OIDC advertises legacy implicit/hybrid token response_types (`token` in URL fragment)"
+        )
+
+    algs = [
+        str(a).strip().lower()
+        for a in payload.get("id_token_signing_alg_values_supported", []) or []
+    ]
+    if "none" in algs:
+        issues.append("OIDC advertises unsigned `none` ID token signing algorithm")
+
+    pkce = [
+        str(m).strip().upper() for m in payload.get("code_challenge_methods_supported", []) or []
+    ]
+    if pkce and "S256" not in pkce:
+        issues.append("OIDC `code_challenge_methods_supported` omits PKCE `S256`")
+    elif not pkce and "code" in resp_types:
+        issues.append("OIDC supports authorization code flow without advertising PKCE (`S256`)")
+
+    return issuer, issues
+
+
+def parse_jwks_payload(payload: dict[str, Any]) -> tuple[int, list[str]]:
+    """Passively audit `/.well-known/jwks.json` for private key leakage or weak key parameters."""
+    raw_keys = payload.get("keys")
+    if not isinstance(raw_keys, list):
+        return 0, []
+    keys = [k for k in raw_keys if isinstance(k, dict)]
+    issues: list[str] = []
+    priv_fields = {"d", "p", "q", "dp", "dq", "qi", "oth"}
+    for idx, k in enumerate(keys):
+        kid = str(k.get("kid") or f"key#{idx}")
+        exposed_priv = sorted(f for f in priv_fields if k.get(f))
+        if exposed_priv:
+            issues.append(f"JWKS `{kid}` exposes private key material ({', '.join(exposed_priv)})")
+        alg = str(k.get("alg") or "").strip().lower()
+        if alg == "none":
+            issues.append(f"JWKS `{kid}` advertises insecure `alg: none`")
+        if str(k.get("kty") or "").upper() == "RSA" and isinstance(k.get("n"), str):
+            mod_b64 = k["n"]
+            padded = mod_b64 + "=" * ((4 - len(mod_b64) % 4) % 4)
+            with contextlib.suppress(Exception):
+                mod_bytes = base64.urlsafe_b64decode(padded.encode("ascii"))
+                bit_len = int.from_bytes(mod_bytes, "big").bit_length()
+                if 0 < bit_len < 2048:
+                    issues.append(f"JWKS RSA key `{kid}` modulus is only {bit_len} bits (< 2048)")
+    return len(keys), issues
+
+
 def inspect_well_known(
     cfg: RuntimeConfig,
     *,
@@ -211,7 +282,7 @@ def inspect_well_known(
     verify: ssl.SSLContext | bool = True,
     http_transport: httpx.BaseTransport | None = None,
 ) -> WellKnownCheck:
-    """Perform at most 2 read-only GETs for `/.well-known/security.txt` and `/robots.txt`."""
+    """Perform bounded read-only GETs on standard RFC well-known metadata endpoints."""
     scheme = parsed.effective_scheme("https")
     port = parsed.effective_port("https")
     default_port = 80 if scheme == "http" else 443
@@ -235,6 +306,16 @@ def inspect_well_known(
     rob_count = 0
     rob_hints: list[str] = []
     rob_sitemaps: list[str] = []
+
+    oidc_present = False
+    oidc_issuer: str | None = None
+    oidc_issues: list[str] = []
+
+    jwks_present = False
+    jwks_key_count = 0
+    jwks_issues: list[str] = []
+
+    mobile_trust_files: list[str] = []
 
     with build_target_client(
         cfg,
@@ -282,6 +363,56 @@ def inspect_well_known(
         except NetworkError:
             pass
 
+        try:
+            oidc_resp = fetch_bounded(
+                client,
+                "GET",
+                f"{origin}/.well-known/openid-configuration",
+                max_bytes=_MAX_META_BYTES,
+            )
+            if oidc_resp.status_code == 200:
+                data = json.loads(oidc_resp.body.decode("utf-8", errors="replace"))
+                if isinstance(data, dict) and (
+                    "issuer" in data or "authorization_endpoint" in data
+                ):
+                    oidc_present = True
+                    oidc_issuer, oidc_issues = parse_oidc_configuration(data)
+        except (NetworkError, ValueError):
+            pass
+
+        try:
+            jwks_resp = fetch_bounded(
+                client,
+                "GET",
+                f"{origin}/.well-known/jwks.json",
+                max_bytes=_MAX_META_BYTES,
+            )
+            if jwks_resp.status_code == 200:
+                data = json.loads(jwks_resp.body.decode("utf-8", errors="replace"))
+                if isinstance(data, dict) and isinstance(data.get("keys"), list):
+                    jwks_present = True
+                    jwks_key_count, jwks_issues = parse_jwks_payload(data)
+        except (NetworkError, ValueError):
+            pass
+
+        for rel_path in (
+            "/.well-known/assetlinks.json",
+            "/.well-known/apple-app-site-association",
+        ):
+            try:
+                m_resp = fetch_bounded(
+                    client,
+                    "GET",
+                    f"{origin}{rel_path}",
+                    max_bytes=64 * 1024,
+                )
+                if m_resp.status_code == 200:
+                    m_data = json.loads(m_resp.body.decode("utf-8", errors="replace"))
+                    if isinstance(m_data, (dict, list)) and m_data:
+                        mobile_trust_files.append(rel_path)
+            except (NetworkError, ValueError):
+                pass
+
     return WellKnownCheck(
         security_txt_present=sec_present,
         security_txt_status=sec_status,
@@ -297,4 +428,11 @@ def inspect_well_known(
         robots_disallow_count=rob_count,
         robots_sensitive_hints=rob_hints,
         robots_sitemaps=rob_sitemaps,
+        oidc_present=oidc_present,
+        oidc_issuer=oidc_issuer,
+        oidc_issues=oidc_issues,
+        jwks_present=jwks_present,
+        jwks_key_count=jwks_key_count,
+        jwks_issues=jwks_issues,
+        mobile_trust_files=mobile_trust_files,
     )

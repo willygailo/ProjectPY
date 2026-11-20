@@ -17,7 +17,7 @@ _SCOPE_FLAGS = (
 _CVE_FLAGS = (
     "--keyword --cpe --from-fingerprint --min-cvss --severity --fail-on "
     "--published-after --published-before --limit --enrich --kev-only "
-    f"--refresh --offline clear {_COMMON_FLAGS}"
+    f"--recursive --refresh --offline clear {_COMMON_FLAGS}"
 )
 _PROFILE_FLAGS = f"--tls-versions --dns-security --well-known --check-methods {_COMMON_FLAGS}"
 _REPORT_FLAGS = f"--input --profile --fingerprint --cve --operator {_COMMON_FLAGS}"
@@ -34,13 +34,13 @@ _ASSESS_FLAGS = (
 )
 _INTEL_FLAGS = (
     "--set-nvd-key --set-github-key --set-vt-key --set-greynoise-key --set-urlscan-key "
-    "--env-file --pinned-ip --sources --cve --ecosystem --package --limit --refresh "
-    f"--offline {_COMMON_FLAGS}"
+    "--env-file --pinned-ip --sources --cve --ecosystem --package --limit "
+    f"--export-candidates --refresh --offline {_COMMON_FLAGS}"
 )
 _REMEDIATE_FLAGS = f"--stack {_COMMON_FLAGS}"
 _FILE_FLAGS = (
     "--out|--scope-file|--from-profile|--from-fingerprint|--input|"
-    "--profile|--fingerprint|--cve|--env-file|--targets-file"
+    "--profile|--fingerprint|--cve|--env-file|--targets-file|--export-candidates"
 )
 
 _BASH_COMPLETION = f"""# bash completion for s1shell
@@ -150,7 +150,7 @@ _s1shell_completions() {{
             ;;
         intel)
             if [[ ${{COMP_CWORD}} -eq 2 ]]; then
-                COMPREPLY=( $(compgen -W "env lookup advisory" -- "${{cur}}") )
+                COMPREPLY=( $(compgen -W "env lookup advisory ct rdap" -- "${{cur}}") )
             else
                 COMPREPLY=( $(compgen -W "{_INTEL_FLAGS}" -- "${{cur}}") )
             fi
@@ -265,8 +265,10 @@ _s1shell() {
                     local -a subcmds
                     subcmds=(
                         'env:Show or update intel API keys in .env'
-                        'lookup:Passive VT/GreyNoise/urlscan lookup'
+                        'lookup:Passive VT/GreyNoise/urlscan/RDAP lookup'
                         'advisory:Query GitHub Security Advisories (GHSA)'
+                        'ct:Passive Certificate Transparency log lookup via crt.sh'
+                        'rdap:RFC 7480-7484 RDAP domain or IP registration lookup'
                     )
                     _describe 'intel command' subcmds
                     ;;
@@ -302,7 +304,7 @@ complete -c s1shell -n "__fish_seen_subcommand_from audit" -a "list verify"
 complete -c s1shell -n "__fish_seen_subcommand_from completion" -a "bash zsh fish"
 complete -c s1shell -n "__fish_seen_subcommand_from ai" -a "env analyze"
 complete -c s1shell -n "__fish_seen_subcommand_from mcp" -a "serve"
-complete -c s1shell -n "__fish_seen_subcommand_from intel" -a "env lookup advisory"
+complete -c s1shell -n "__fish_seen_subcommand_from intel" -a "env lookup advisory ct rdap"
 
 complete -c s1shell -l format -x -a "table json md html sarif"
 complete -c s1shell -l preset -x -a "web api strict"

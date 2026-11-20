@@ -6,16 +6,19 @@ import hashlib
 import json
 import re
 import time
+import xml.etree.ElementTree as ET
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote
 
 import httpx
+import yaml
 
 from s1shell.audit import AuditEvent, AuditLogger
 from s1shell.config import RuntimeConfig
 from s1shell.cve.cache import CVECache
+from s1shell.cve.cvss import calculate_cvss3_base_score, score_to_severity
 from s1shell.cve.enrichment import EPSSClient, KEVClient
 from s1shell.cve.models import (
     DependencyAuditResult,
@@ -30,6 +33,37 @@ _REQ_PIN_RE = re.compile(
     r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)(?:\[[^\]]+\])?\s*===?\s*([A-Za-z0-9._+-]+)"
 )
 _GOMOD_REQ_RE = re.compile(r"^\s*(?:require\s+)?([^\s/]+(?:/[^\s]+)+)\s+v([0-9][^\s]*)\s*$")
+_GEMFILE_SPEC_RE = re.compile(r"^\s{4}([A-Za-z0-9._-]+)\s+\(([0-9][^)\s]*)\)")
+_YARN_HEADER_RE = re.compile(r'^"?(@?[^@\s",:][^@\s",]*?)@')
+_YARN_VERSION_RE = re.compile(r'^\s+version(?:\s*[:=]\s*|\s+)"?([^"\s]+)"?')
+_PNPM_PKG_KEY_RE = re.compile(r"^/?(@?[^@/\s]+(?:/[^@/\s]+)?)[@/]([0-9][^(:\s]+)")
+_SKIP_DIRS = {
+    ".git",
+    "node_modules",
+    ".venv",
+    "venv",
+    "__pycache__",
+    "target",
+    "dist",
+    "build",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+}
+_DISCOVERABLE_FILENAMES = {
+    "requirements.txt",
+    "package-lock.json",
+    "go.mod",
+    "cargo.lock",
+    "uv.lock",
+    "poetry.lock",
+    "pipfile.lock",
+    "yarn.lock",
+    "pnpm-lock.yaml",
+    "composer.lock",
+    "gemfile.lock",
+    "pom.xml",
+}
 _PURL_ECOSYSTEM_MAP = {
     "pypi": "PyPI",
     "npm": "npm",
@@ -41,6 +75,101 @@ _PURL_ECOSYSTEM_MAP = {
     "gem": "RubyGems",
 }
 _SEV_RANK = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
+
+
+def discover_dependency_files(root: Path, *, recursive: bool = True) -> list[Path]:
+    """Discover supported lockfiles and CycloneDX/SPDX SBOMs under a directory."""
+    resolved = root.expanduser().resolve()
+    if resolved.is_file():
+        return [resolved]
+    if not resolved.is_dir():
+        raise ValidationError(f"Dependency path does not exist: '{root}'.")
+
+    found: list[Path] = []
+    iterator = resolved.rglob("*") if recursive else resolved.iterdir()
+    for p in iterator:
+        if not p.is_file():
+            continue
+        rel_parts = p.relative_to(resolved).parts
+        if any(part in _SKIP_DIRS for part in rel_parts[:-1]):
+            continue
+        low = p.name.lower()
+        if (
+            low in _DISCOVERABLE_FILENAMES
+            or low.endswith((".cdx.json", ".spdx.json"))
+            or (low.startswith("requirements") and low.endswith(".txt"))
+        ):
+            found.append(p)
+    return sorted(found)
+
+
+def _parse_toml_lock_packages(raw_text: str, *, ecosystem: str) -> list[tuple[str, str, str]]:
+    """Parse `[[package]]` blocks from `Cargo.lock`, `uv.lock`, or `poetry.lock`."""
+    out: list[tuple[str, str, str]] = []
+    cur_name: str | None = None
+    cur_ver: str | None = None
+    in_pkg = False
+    for raw_line in raw_text.splitlines():
+        line = raw_line.strip()
+        if line == "[[package]]":
+            if cur_name and cur_ver:
+                out.append((ecosystem, cur_name, cur_ver))
+            cur_name = None
+            cur_ver = None
+            in_pkg = True
+            continue
+        if line.startswith("[") and line != "[[package]]":
+            if cur_name and cur_ver:
+                out.append((ecosystem, cur_name, cur_ver))
+                cur_name = None
+                cur_ver = None
+            in_pkg = False
+            continue
+        if not in_pkg:
+            continue
+        if line.startswith("name = "):
+            cur_name = line.split("=", 1)[1].strip().strip('"').strip("'")
+        elif line.startswith("version = "):
+            cur_ver = line.split("=", 1)[1].strip().strip('"').strip("'")
+    if cur_name and cur_ver:
+        out.append((ecosystem, cur_name, cur_ver))
+    return out
+
+
+def build_upgrade_commands(vulns: list[DependencyVuln]) -> list[str]:
+    """Generate deterministic safe upgrade commands grouped by package ecosystem."""
+    upgrades: dict[tuple[str, str], str] = {}
+    for v in vulns:
+        if not v.fixed_versions:
+            continue
+        key = (v.ecosystem, v.package)
+        upgrades[key] = v.fixed_versions[-1]
+
+    by_eco: dict[str, list[tuple[str, str]]] = {}
+    for (eco, pkg), ver in sorted(upgrades.items()):
+        by_eco.setdefault(eco, []).append((pkg, ver))
+
+    cmds: list[str] = []
+    for eco, items in by_eco.items():
+        if eco == "PyPI":
+            specs = " ".join(f'"{p}>={v}"' for p, v in items[:10])
+            cmds.append(f"pip install --upgrade {specs}")
+        elif eco == "npm":
+            specs = " ".join(f"{p}@{v}" for p, v in items[:10])
+            cmds.append(f"npm install {specs}")
+        elif eco == "Go":
+            specs = " ".join(f"{p}@v{v.lstrip('v')}" for p, v in items[:10])
+            cmds.append(f"go get {specs} && go mod tidy")
+        elif eco == "crates.io":
+            specs = " ".join(f"-p {p}" for p, _ in items[:10])
+            cmds.append(f"cargo update {specs}")
+        elif eco == "Packagist":
+            specs = " ".join(f"{p}:^{v}" for p, v in items[:10])
+            cmds.append(f"composer require {specs}")
+        elif eco == "RubyGems":
+            specs = " ".join(p for p, _ in items[:10])
+            cmds.append(f"bundle update {specs}")
+    return cmds
 
 
 def _parse_purl(purl: str) -> DependencyPackage | None:
@@ -80,11 +209,22 @@ def parse_dependency_file(path: Path) -> tuple[str, list[DependencyPackage]]:
         key = (eco, name.strip(), ver.strip())
         if key[1] and key[2] and key not in seen:
             seen.add(key)
-            packages.append(DependencyPackage(ecosystem=eco, name=key[1], version=key[2]))
+            packages.append(
+                DependencyPackage(
+                    ecosystem=eco,
+                    name=key[1],
+                    version=key[2],
+                    source_file=str(path),
+                )
+            )
 
-    # 1. JSON formats: package-lock.json or CycloneDX SBOM
+    # 1. JSON formats: CycloneDX SBOM, SPDX 2.3 SBOM, package-lock.json, Pipfile.lock, composer.lock
     stripped = raw_text.lstrip()
-    if fname.endswith(".json") or stripped.startswith("{"):
+    if (
+        fname.endswith(".json")
+        or fname in {"pipfile.lock", "composer.lock"}
+        or stripped.startswith("{")
+    ):
         try:
             data = json.loads(raw_text)
         except ValueError as exc:
@@ -92,6 +232,7 @@ def parse_dependency_file(path: Path) -> tuple[str, list[DependencyPackage]]:
         if not isinstance(data, dict):
             raise ValidationError(f"Expected JSON object in '{path}'.")
 
+        # 1a. CycloneDX JSON SBOM
         if data.get("bomFormat") == "CycloneDX" or isinstance(data.get("components"), list):
             for comp in data.get("components", []):
                 if not isinstance(comp, dict):
@@ -103,7 +244,54 @@ def parse_dependency_file(path: Path) -> tuple[str, list[DependencyPackage]]:
                         _add(parsed.ecosystem, parsed.name, parsed.version)
             return "cyclonedx", packages
 
-        # npm package-lock.json (v2/v3 `packages` or v1 `dependencies`)
+        # 1b. SPDX 2.x JSON SBOM
+        if data.get("spdxVersion") or (
+            isinstance(data.get("packages"), list) and data.get("SPDXID")
+        ):
+            for pkg in data.get("packages", []):
+                if not isinstance(pkg, dict):
+                    continue
+                for ref in pkg.get("externalRefs", []) or []:
+                    if not isinstance(ref, dict):
+                        continue
+                    if str(ref.get("referenceType") or "").lower() == "purl":
+                        purl_str = str(ref.get("referenceLocator") or "").strip()
+                        parsed = _parse_purl(purl_str)
+                        if parsed is not None:
+                            _add(parsed.ecosystem, parsed.name, parsed.version)
+            return "spdx", packages
+
+        # 1c. PHP composer.lock
+        if fname == "composer.lock" or (
+            isinstance(data.get("packages"), list) and "content-hash" in data
+        ):
+            for section in ("packages", "packages-dev"):
+                for item in data.get(section, []) or []:
+                    if not isinstance(item, dict):
+                        continue
+                    cname = str(item.get("name") or "").strip()
+                    cver = str(item.get("version") or "").strip().lstrip("v")
+                    if cname and cver:
+                        _add("Packagist", cname, cver)
+            return "composer.lock", packages
+
+        # 1d. Python Pipfile.lock
+        if fname == "pipfile.lock" or (
+            isinstance(data.get("_meta"), dict) and isinstance(data.get("default"), dict)
+        ):
+            for section in ("default", "develop"):
+                sec_map = data.get(section)
+                if not isinstance(sec_map, dict):
+                    continue
+                for pname, meta in sec_map.items():
+                    if not isinstance(meta, dict):
+                        continue
+                    pver = str(meta.get("version") or "").strip().lstrip("=")
+                    if pname and pver:
+                        _add("PyPI", str(pname), pver)
+            return "Pipfile.lock", packages
+
+        # 1e. npm package-lock.json (v2/v3 `packages` or v1 `dependencies`)
         if isinstance(data.get("packages"), dict):
             for pkg_path, meta in data["packages"].items():
                 if not isinstance(meta, dict) or not pkg_path:
@@ -135,8 +323,8 @@ def parse_dependency_file(path: Path) -> tuple[str, list[DependencyPackage]]:
             return "package-lock.json", packages
 
         raise ValidationError(
-            f"Unrecognized JSON dependency format in '{path}'. "
-            "Supported JSON formats: package-lock.json and CycloneDX SBOM."
+            f"Unrecognized JSON dependency format in '{path}'. Supported JSON formats: "
+            "package-lock.json, CycloneDX, SPDX, Pipfile.lock, composer.lock."
         )
 
     # 2. Go `go.mod`
@@ -157,27 +345,93 @@ def parse_dependency_file(path: Path) -> tuple[str, list[DependencyPackage]]:
                 _add("Go", m.group(1), m.group(2))
         return "go.mod", packages
 
-    # 3. Rust `Cargo.lock`
-    if fname == "cargo.lock":
-        cur_name: str | None = None
-        cur_ver: str | None = None
-        for raw_line in raw_text.splitlines():
-            line = raw_line.strip()
-            if line == "[[package]]":
-                if cur_name and cur_ver:
-                    _add("crates.io", cur_name, cur_ver)
-                cur_name = None
-                cur_ver = None
-                continue
-            if line.startswith("name = "):
-                cur_name = line.split("=", 1)[1].strip().strip('"')
-            elif line.startswith("version = "):
-                cur_ver = line.split("=", 1)[1].strip().strip('"')
-        if cur_name and cur_ver:
-            _add("crates.io", cur_name, cur_ver)
-        return "Cargo.lock", packages
+    # 3. Rust `Cargo.lock` / Python `uv.lock` / `poetry.lock`
+    if fname in {"cargo.lock", "uv.lock", "poetry.lock"}:
+        eco = "crates.io" if fname == "cargo.lock" else "PyPI"
+        fmt_label = {
+            "cargo.lock": "Cargo.lock",
+            "uv.lock": "uv.lock",
+            "poetry.lock": "poetry.lock",
+        }[fname]
+        for p_eco, p_name, p_ver in _parse_toml_lock_packages(raw_text, ecosystem=eco):
+            _add(p_eco, p_name, p_ver)
+        return fmt_label, packages
 
-    # 4. Default: Python `requirements.txt`
+    # 4. Yarn `yarn.lock` (v1 classic & Berry YAML-ish)
+    if fname == "yarn.lock":
+        cur_yarn_name: str | None = None
+        for raw_line in raw_text.splitlines():
+            if not raw_line.strip() or raw_line.lstrip().startswith("#"):
+                continue
+            if not raw_line[0].isspace() and raw_line.rstrip().endswith(":"):
+                hm = _YARN_HEADER_RE.match(raw_line.strip())
+                cur_yarn_name = hm.group(1).strip() if hm else None
+                continue
+            if cur_yarn_name:
+                vm = _YARN_VERSION_RE.match(raw_line)
+                if vm:
+                    _add("npm", cur_yarn_name, vm.group(1))
+                    cur_yarn_name = None
+        return "yarn.lock", packages
+
+    # 5. pnpm `pnpm-lock.yaml`
+    if fname == "pnpm-lock.yaml":
+        try:
+            doc = yaml.safe_load(raw_text) or {}
+        except yaml.YAMLError as exc:
+            raise ValidationError(f"Invalid YAML in '{path}': {exc}") from exc
+        if isinstance(doc, dict):
+            for section in ("packages", "snapshots"):
+                sec = doc.get(section)
+                if not isinstance(sec, dict):
+                    continue
+                for raw_key in sec:
+                    km = _PNPM_PKG_KEY_RE.match(str(raw_key).strip())
+                    if km:
+                        _add("npm", km.group(1), km.group(2))
+        return "pnpm-lock.yaml", packages
+
+    # 6. Ruby `Gemfile.lock`
+    if fname == "gemfile.lock":
+        in_specs = False
+        for raw_line in raw_text.splitlines():
+            if raw_line.strip() == "specs:":
+                in_specs = True
+                continue
+            if in_specs and raw_line and not raw_line[0].isspace():
+                in_specs = False
+            if in_specs:
+                gm = _GEMFILE_SPEC_RE.match(raw_line)
+                if gm:
+                    _add("RubyGems", gm.group(1), gm.group(2))
+        return "Gemfile.lock", packages
+
+    # 7. Maven `pom.xml`
+    if fname == "pom.xml" or fname.endswith(".xml"):
+        try:
+            root_el = ET.fromstring(raw_text)  # noqa: S314
+        except ET.ParseError as exc:
+            raise ValidationError(f"Invalid XML in '{path}': {exc}") from exc
+        for dep in root_el.iter():
+            if not dep.tag.endswith("dependency"):
+                continue
+            gid = ""
+            aid = ""
+            ver = ""
+            for child in dep:
+                tag = child.tag.rsplit("}", 1)[-1]
+                text = (child.text or "").strip()
+                if tag == "groupId":
+                    gid = text
+                elif tag == "artifactId":
+                    aid = text
+                elif tag == "version":
+                    ver = text
+            if gid and aid and ver and not ver.startswith("${"):
+                _add("Maven", f"{gid}:{aid}", ver)
+        return "pom.xml", packages
+
+    # 8. Default: Python `requirements.txt`
     for raw_line in raw_text.splitlines():
         line = raw_line.split("#", 1)[0].strip()
         if not line or line.startswith(("-", "git+", "http://", "https://")):
@@ -189,30 +443,44 @@ def parse_dependency_file(path: Path) -> tuple[str, list[DependencyPackage]]:
 
 
 def _extract_osv_severity(vuln: dict[str, Any]) -> tuple[str, float | None]:
-    db_spec = vuln.get("database_specific")
-    if isinstance(db_spec, dict) and db_spec.get("severity"):
-        raw = str(db_spec["severity"]).strip().upper()
-        if raw == "MODERATE":
-            raw = "MEDIUM"
-        if raw in _SEV_RANK:
-            return raw, None
+    best_score: float | None = None
+    best_sev: str | None = None
 
     for sev_item in vuln.get("severity", []):
         if not isinstance(sev_item, dict):
             continue
         score_raw = str(sev_item.get("score") or "").strip()
+        if not score_raw:
+            continue
+        parsed_vec = calculate_cvss3_base_score(score_raw)
+        if parsed_vec is not None:
+            num, sev = parsed_vec
+            if best_score is None or num > best_score:
+                best_score = num
+                best_sev = sev
+            continue
         try:
             num = float(score_raw)
         except ValueError:
             continue
-        if num >= 9.0:
-            return "CRITICAL", num
-        if num >= 7.0:
-            return "HIGH", num
-        if num >= 4.0:
-            return "MEDIUM", num
-        return "LOW", num
+        sev = score_to_severity(num)
+        if best_score is None or num > best_score:
+            best_score = num
+            best_sev = sev
 
+    db_spec = vuln.get("database_specific")
+    db_sev: str | None = None
+    if isinstance(db_spec, dict) and db_spec.get("severity"):
+        raw = str(db_spec["severity"]).strip().upper()
+        if raw == "MODERATE":
+            raw = "MEDIUM"
+        if raw in _SEV_RANK:
+            db_sev = raw
+
+    if best_sev is not None and best_score is not None:
+        return best_sev, best_score
+    if db_sev is not None:
+        return db_sev, best_score
     return "MEDIUM", None
 
 
@@ -310,6 +578,54 @@ class DependencyAuditService:
         self.epss_client = epss_client if epss_client is not None else EPSSClient(cfg)
         self.audit_logger = audit_logger if audit_logger is not None else AuditLogger(cfg.audit_log)
 
+    def audit_path(
+        self,
+        path: Path,
+        *,
+        recursive: bool = False,
+        offline: bool = False,
+        refresh: bool = False,
+        enrich: bool = False,
+        kev_only: bool = False,
+    ) -> DependencyAuditResult:
+        """Audit either a single lockfile/SBOM or a directory of lockfiles/SBOMs."""
+        resolved = path.expanduser().resolve()
+        if resolved.is_file():
+            return self.audit_file(
+                resolved,
+                offline=offline,
+                refresh=refresh,
+                enrich=enrich,
+                kev_only=kev_only,
+            )
+        files = discover_dependency_files(resolved, recursive=recursive)
+        if not files:
+            raise ValidationError(f"No supported lockfiles or SBOMs found under '{path}'.")
+
+        all_packages: list[DependencyPackage] = []
+        formats: list[str] = []
+        for fpath in files:
+            try:
+                fmt, pkgs = parse_dependency_file(fpath)
+            except ValidationError:
+                continue
+            if fmt not in formats:
+                formats.append(fmt)
+            all_packages.extend(pkgs)
+
+        return self._audit_packages(
+            source_label=str(path),
+            fmt_label="multi(" + ",".join(formats) + ")"
+            if len(formats) > 1
+            else (formats[0] if formats else "empty"),
+            packages=all_packages,
+            source_files=[str(f) for f in files],
+            offline=offline,
+            refresh=refresh,
+            enrich=enrich,
+            kev_only=kev_only,
+        )
+
     def audit_file(
         self,
         path: Path,
@@ -321,14 +637,40 @@ class DependencyAuditService:
     ) -> DependencyAuditResult:
         """Parse `path` and correlate pinned packages with OSV.dev (+ optional KEV/EPSS)."""
         fmt, packages = parse_dependency_file(path)
+        return self._audit_packages(
+            source_label=str(path),
+            fmt_label=fmt,
+            packages=packages,
+            source_files=[str(path)],
+            offline=offline,
+            refresh=refresh,
+            enrich=enrich,
+            kev_only=kev_only,
+        )
+
+    def _audit_packages(
+        self,
+        *,
+        source_label: str,
+        fmt_label: str,
+        packages: list[DependencyPackage],
+        source_files: list[str],
+        offline: bool,
+        refresh: bool,
+        enrich: bool,
+        kev_only: bool,
+    ) -> DependencyAuditResult:
         if not packages:
             return DependencyAuditResult(
-                source_file=str(path),
-                format_detected=fmt,
+                source_file=source_label,
+                format_detected=fmt_label,
                 packages_scanned=0,
                 vulnerable_packages=0,
                 cached=True,
                 vulnerabilities=[],
+                source_files=source_files,
+                upgrade_commands=[],
+                unpatched_count=0,
             )
 
         sig_payload = json.dumps(
@@ -347,17 +689,17 @@ class DependencyAuditService:
         else:
             if offline:
                 raise NetworkError(
-                    f"Cache miss in --offline mode for dependency audit of '{path}'."
+                    f"Cache miss in --offline mode for dependency audit of '{source_label}'."
                 )
             started = time.monotonic()
             try:
                 raw_results = self.osv_client.query_batch(packages)
                 self.cache.set(cache_key, raw_results)
-                self._log_intel("cve audit", str(path.name), "success", 0, started)
+                self._log_intel("cve audit", Path(source_label).name, "success", 0, started)
             except Exception as exc:
                 self._log_intel(
                     "cve audit",
-                    str(path.name),
+                    Path(source_label).name,
                     "error",
                     int(ExitCode.ERROR),
                     started,
@@ -404,6 +746,7 @@ class DependencyAuditService:
                         fixed_versions=fixed,
                         priority=compute_cve_priority(cvss_score=cvss_score),
                         references=refs,
+                        source_file=pkg.source_file,
                     )
                 )
 
@@ -423,13 +766,17 @@ class DependencyAuditService:
             )
         )
         vuln_pkg_count = len({(v.ecosystem, v.package, v.version) for v in vulns})
+        unpatched = sum(1 for v in vulns if not v.fixed_versions)
         return DependencyAuditResult(
-            source_file=str(path),
-            format_detected=fmt,
+            source_file=source_label,
+            format_detected=fmt_label,
             packages_scanned=len(packages),
             vulnerable_packages=vuln_pkg_count,
             cached=cached,
             vulnerabilities=vulns,
+            source_files=source_files,
+            upgrade_commands=build_upgrade_commands(vulns),
+            unpatched_count=unpatched,
         )
 
     def _enrich_vulns(

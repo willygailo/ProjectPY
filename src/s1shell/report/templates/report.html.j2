@@ -280,6 +280,12 @@
         {% if prof.tls.get("spki_sha256") %}
         <br>SPKI Pin (SHA-256): <code>{{ prof.tls.spki_sha256 }}</code>
         {% endif %}
+        {% if prof.tls.get("chain_length") %}
+        | Chain Depth: <strong>{{ prof.tls.chain_length }}</strong>
+        {% endif %}
+        {% if prof.tls.get("chain_issues") %}
+        <br>Chain Issues: <span class="badge MEDIUM">{{ prof.tls.chain_issues | join("; ") }}</span>
+        {% endif %}
         {% if prof.tls.supported_versions %}
         <br>Supported Versions: <code>{{ prof.tls.supported_versions | join(", ") }}</code>
         {% endif %}
@@ -363,7 +369,7 @@
         <tbody>
         {% for m in fp.matches %}
           <tr>
-            <td>{{ m.product }}</td>
+            <td>{{ m.product }}{% if m.get("eol") %} <span class="badge HIGH">EOL</span>{% endif %}</td>
             <td><code>{{ m.get("version") or "—" }}</code></td>
             <td>{{ m.vendor }}</td>
             <td>{{ m.category }}</td>
@@ -411,6 +417,15 @@
         Total Indexed Scans=<strong>{{ it.urlscan.total_results }}</strong>
         {% if it.urlscan.get("observed_servers") %}| Observed Servers: <code>{{ it.urlscan.observed_servers | join(", ") }}</code>{% endif %}
         {% if it.urlscan.get("observed_ips") %}| Observed IPs: <code>{{ it.urlscan.observed_ips[:6] | join(", ") }}</code>{% endif %}
+      </p>
+      {% endif %}
+      {% if it.get("rdap") %}
+      <p>
+        <strong>RDAP ({{ it.rdap.indicator_type }}):</strong>
+        Registrar=<code>{{ it.rdap.get("registrar") or "—" }}</code> |
+        Expires=<code>{{ it.rdap.get("expires_at") or "—" }}</code> |
+        Transfer Locked=<strong>{{ it.rdap.get("transfer_locked") }}</strong>
+        {% if it.rdap.get("cidr") %}| CIDR: <code>{{ it.rdap.cidr }}</code>{% endif %}
       </p>
       {% endif %}
     </div>

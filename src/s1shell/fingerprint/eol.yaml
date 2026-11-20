@@ -1,0 +1,84 @@
+# Curated offline End-of-Life (EOL) baseline for passive software fingerprinting.
+# Versions strictly less than `min_supported` (or matching an explicit `eol_cycles` prefix)
+# are flagged as End-of-Life (`EOL-001`, CWE-1104) with zero network contact.
+version: 1
+products:
+  - product: "nginx"
+    min_supported: "1.26.0"
+    note: "NGINX branches older than 1.26.x no longer receive upstream security updates."
+    recommended: "Upgrade to NGINX 1.26.x stable or 1.28.x mainline."
+
+  - product: "Apache HTTP Server"
+    min_supported: "2.4.58"
+    note: "Apache HTTP Server 2.2.x and outdated 2.4.x releases are end-of-life or missing critical patches."
+    recommended: "Upgrade to the latest Apache HTTP Server 2.4.x release."
+
+  - product: "PHP"
+    min_supported: "8.2.0"
+    note: "PHP 5.x, 7.x, 8.0, and 8.1 have reached End-of-Life for upstream security support."
+    recommended: "Upgrade to PHP 8.3 or 8.4."
+
+  - product: "Python"
+    min_supported: "3.10.0"
+    note: "Python 2.x and 3.6–3.9 have reached upstream End-of-Life."
+    recommended: "Upgrade to Python 3.12 or newer."
+
+  - product: "Node.js"
+    min_supported: "20.0.0"
+    note: "Node.js releases older than v20 LTS have reached End-of-Life."
+    recommended: "Upgrade to an active Node.js LTS release (v20 or v22)."
+
+  - product: "OpenSSL"
+    min_supported: "3.0.0"
+    note: "OpenSSL 1.0.x and 1.1.1 have reached upstream End-of-Life."
+    recommended: "Upgrade to OpenSSL 3.0 LTS or 3.2+."
+
+  - product: "jQuery"
+    min_supported: "3.5.0"
+    note: "jQuery 1.x, 2.x, and <3.5.0 contain known XSS parsing issues and are unmaintained."
+    recommended: "Upgrade to jQuery 3.7.x."
+
+  - product: "Bootstrap"
+    min_supported: "5.0.0"
+    note: "Bootstrap 3.x and 4.x have reached End-of-Life."
+    recommended: "Upgrade to Bootstrap 5.3.x."
+
+  - product: "AngularJS"
+    min_supported: "99.0.0"
+    note: "AngularJS (1.x) reached permanent End-of-Life on December 31, 2021."
+    recommended: "Migrate to supported modern Angular or another maintained frontend framework."
+
+  - product: "WordPress"
+    min_supported: "6.4.0"
+    note: "Legacy WordPress core releases outside active security backports are unsupported."
+    recommended: "Upgrade to the latest WordPress 6.x release."
+
+  - product: "Drupal"
+    min_supported: "10.0.0"
+    note: "Drupal 7, 8, and 9 have reached End-of-Life."
+    recommended: "Upgrade to Drupal 10.x or 11.x."
+
+  - product: "Apache Tomcat"
+    min_supported: "9.0.0"
+    note: "Apache Tomcat 7.x and 8.5.x have reached End-of-Life."
+    recommended: "Upgrade to Apache Tomcat 10.1.x or 11.x."
+
+  - product: "Microsoft-IIS"
+    min_supported: "10.0"
+    note: "IIS versions prior to 10.0 run on End-of-Life Windows Server releases."
+    recommended: "Migrate to Windows Server 2022/2025 with IIS 10.0."
+
+  - product: "Lodash"
+    min_supported: "4.17.21"
+    note: "Lodash versions prior to 4.17.21 are affected by prototype pollution and ReDoS issues."
+    recommended: "Upgrade to Lodash 4.17.21 or migrate to native ES utilities."
+
+  - product: "Moment.js"
+    min_supported: "99.0.0"
+    note: "Moment.js is officially in legacy maintenance mode (no new features/active development)."
+    recommended: "Migrate to Luxon, Day.js, date-fns, or Temporal."
+
+  - product: "HAProxy"
+    min_supported: "2.8.0"
+    note: "HAProxy branches older than 2.8 LTS have reached End-of-Life."
+    recommended: "Upgrade to HAProxy 2.8 LTS or 3.0 LTS."

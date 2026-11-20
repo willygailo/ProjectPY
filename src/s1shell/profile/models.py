@@ -3,9 +3,24 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 from s1shell import __version__
 from s1shell.models import SCHEMA_VERSION, utc_now_iso
+
+
+@dataclass(frozen=True)
+class CertChainEntry:
+    """Single X.509 certificate entry within a server's presented TLS chain."""
+
+    subject: str
+    issuer: str
+    not_after: str | None = None
+    days_remaining: int | None = None
+    key_type: str | None = None
+    key_size: int | None = None
+    signature_algorithm: str | None = None
+    is_self_signed: bool = False
 
 
 @dataclass(frozen=True)
@@ -22,10 +37,15 @@ class DNSRecords:
     txt: list[str] = field(default_factory=list)
     spf: str | None = None
     spf_lookup_count: int | None = None
+    spf_recursive_lookups: int | None = None
+    spf_void_lookups: int = 0
+    spf_issues: list[str] = field(default_factory=list)
     dmarc: str | None = None
     dmarc_policy: str | None = None
     mta_sts: str | None = None
     tls_rpt: str | None = None
+    bimi: str | None = None
+    tlsa: list[str] = field(default_factory=list)
     dnssec_present: bool | None = None
     dangling_cnames: list[str] = field(default_factory=list)
     apex_domain: str | None = None
@@ -62,6 +82,9 @@ class TLSResult:
     spki_sha256: str | None = None
     cipher_weaknesses: list[str] = field(default_factory=list)
     client_blocked_versions: list[str] = field(default_factory=list)
+    chain: list[CertChainEntry] = field(default_factory=list)
+    chain_length: int = 0
+    chain_issues: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -146,11 +169,15 @@ class HTMLPassiveAnalysis:
     third_party_origins: list[str] = field(default_factory=list)
     inline_script_count: int = 0
     unsafe_blank_links: int = 0
+    leaked_secrets: list[dict[str, str]] = field(default_factory=list)
+    passive_jwts: list[dict[str, Any]] = field(default_factory=list)
+    source_maps: list[str] = field(default_factory=list)
+    stack_traces: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
 class WellKnownCheck:
-    """Opt-in read-only review of `/.well-known/security.txt` and `/robots.txt`."""
+    """Opt-in read-only review of RFC well-known metadata (`security.txt`, OIDC, JWKS, mobile)."""
 
     security_txt_present: bool = False
     security_txt_status: int | None = None
@@ -166,6 +193,13 @@ class WellKnownCheck:
     robots_disallow_count: int = 0
     robots_sensitive_hints: list[str] = field(default_factory=list)
     robots_sitemaps: list[str] = field(default_factory=list)
+    oidc_present: bool = False
+    oidc_issuer: str | None = None
+    oidc_issues: list[str] = field(default_factory=list)
+    jwks_present: bool = False
+    jwks_key_count: int = 0
+    jwks_issues: list[str] = field(default_factory=list)
+    mobile_trust_files: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

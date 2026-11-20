@@ -222,8 +222,12 @@ def _evaluate_csp(
         weak_reasons.append("wildcard '*'")
     if "data:" in script_low:
         weak_reasons.append("script-src allows data:")
+    if "blob:" in script_low:
+        weak_reasons.append("script-src allows blob:")
     if "http:" in script_low:
         weak_reasons.append("script-src allows http:")
+    if "https:" in script_low and not modern_controls:
+        weak_reasons.append("script-src allows wildcard https: scheme")
 
     if not modern_controls:
         broad_cdns = [cdn for cdn in _CSP_JSONP_CDN_HOSTS if any(cdn in src for src in script_low)]

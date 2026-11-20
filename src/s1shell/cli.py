@@ -36,6 +36,7 @@ from s1shell.output import (
     render_audit_events,
     render_audit_verify,
     render_batch_assessment,
+    render_ct_lookup,
     render_cve_result,
     render_dependency_audit,
     render_doctor_report,
@@ -44,6 +45,7 @@ from s1shell.output import (
     render_intel_env,
     render_intel_lookup,
     render_profile_result,
+    render_rdap_lookup,
     render_remediation_plan,
     render_scope_check,
     render_scope_entries,
@@ -227,9 +229,18 @@ def build_parser() -> argparse.ArgumentParser:
     c_audit = cve_cmds.add_parser(
         "audit",
         parents=[common],
-        help="Audit lockfile (requirements.txt/package-lock.json/go.mod/Cargo.lock) or CycloneDX.",
+        help="Audit lockfile, SBOM (CycloneDX/SPDX), or directory of lockfiles via OSV.dev.",
     )
-    c_audit.add_argument("file", type=Path, help="Path to dependency lockfile or CycloneDX SBOM.")
+    c_audit.add_argument(
+        "file",
+        type=Path,
+        help="Path to lockfile, CycloneDX/SPDX SBOM, or project directory.",
+    )
+    c_audit.add_argument(
+        "--recursive",
+        action="store_true",
+        help="Recursively discover and audit all supported lockfiles/SBOMs inside a directory.",
+    )
     c_audit.add_argument(
         "--enrich",
         action="store_true",
@@ -674,6 +685,30 @@ def build_parser() -> argparse.ArgumentParser:
     i_adv.add_argument("--refresh", action="store_true", help="Bypass local cache.")
     i_adv.add_argument("--offline", action="store_true", help="Read from local cache only.")
 
+    i_ct = intel_cmds.add_parser(
+        "ct",
+        parents=[common],
+        help="Passive Certificate Transparency log lookup via crt.sh (zero target contact).",
+    )
+    i_ct.add_argument("domain", help="Domain name to inspect in public CT logs.")
+    i_ct.add_argument(
+        "--export-candidates",
+        type=Path,
+        default=None,
+        help="Write discovered subdomains to FILE for authorization review before `scope import`.",
+    )
+    i_ct.add_argument("--refresh", action="store_true", help="Bypass local cache.")
+    i_ct.add_argument("--offline", action="store_true", help="Read from local cache only.")
+
+    i_rdap = intel_cmds.add_parser(
+        "rdap",
+        parents=[common],
+        help="Query RFC 7480-7484 RDAP domain or IP/ASN registration data (no API key).",
+    )
+    i_rdap.add_argument("indicator", help="Domain name or IP address for RDAP lookup.")
+    i_rdap.add_argument("--refresh", action="store_true", help="Bypass local cache.")
+    i_rdap.add_argument("--offline", action="store_true", help="Read from local cache only.")
+
     # --- mcp ---
     mcp_p = modules.add_parser(
         "mcp",
@@ -845,8 +880,9 @@ def dispatch(
                 if dep_audit_service is not None
                 else DependencyAuditService(cfg, audit_logger=audit_log)
             )
-            dep_res = dep_svc.audit_file(
+            dep_res = dep_svc.audit_path(
                 args.file,
+                recursive=bool(args.recursive),
                 offline=bool(args.offline),
                 refresh=bool(args.refresh),
                 enrich=bool(args.enrich or args.kev_only),
@@ -1197,6 +1233,23 @@ def dispatch(
             render_ghsa_advisories(
                 adv_res, fmt=fmt, console=console, out_file=out_file, stdout=stdout
             )
+            return int(ExitCode.SUCCESS)
+        if args.command == "ct":
+            ct_res = i_svc.ct_lookup(
+                args.domain,
+                offline=bool(args.offline),
+                refresh=bool(args.refresh),
+                export_candidates=args.export_candidates,
+            )
+            render_ct_lookup(ct_res, fmt=fmt, console=console, out_file=out_file, stdout=stdout)
+            return int(ExitCode.SUCCESS)
+        if args.command == "rdap":
+            rdap_res = i_svc.rdap_lookup(
+                args.indicator,
+                offline=bool(args.offline),
+                refresh=bool(args.refresh),
+            )
+            render_rdap_lookup(rdap_res, fmt=fmt, console=console, out_file=out_file, stdout=stdout)
             return int(ExitCode.SUCCESS)
 
     if args.module == "mcp" and args.command == "serve":

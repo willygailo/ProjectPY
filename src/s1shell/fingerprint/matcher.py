@@ -193,15 +193,22 @@ def match_signatures(
         if evidence:
             base_conf = str(rule.get("confidence", "medium"))
             confidence = "high" if len(evidence) >= 2 else base_conf
+            prod_name = str(rule.get("product", "Unknown"))
+            from s1shell.fingerprint.eol import check_product_eol
+
+            eol_status = check_product_eol(prod_name, detected_version)
             matches.append(
                 FingerprintMatch(
                     vendor=str(rule.get("vendor", "Unknown")),
-                    product=str(rule.get("product", "Unknown")),
+                    product=prod_name,
                     category=str(rule.get("category", "unknown")),
                     confidence=confidence,
                     version=detected_version,
                     evidence=evidence,
                     cpe=_build_cpe(rule, detected_version),
+                    eol=bool(eol_status and eol_status.is_eol),
+                    eol_note=eol_status.note if eol_status else None,
+                    eol_recommended=eol_status.recommended if eol_status else None,
                 )
             )
 

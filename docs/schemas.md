@@ -9,6 +9,8 @@ All JSON outputs emitted with `--format json` include:
   - `"dependency_audit_report"` (`s1shell cve audit`)
   - `"intel_report"` (`s1shell intel lookup`)
   - `"ghsa_report"` (`s1shell intel advisory`)
+  - `"ct_report"` (`s1shell intel ct`)
+  - `"rdap_report"` (`s1shell intel rdap`)
   - `"intel_env_status"` (`s1shell intel env`)
   - `"profile_report"` (`s1shell profile`)
   - `"fingerprint_report"` (`s1shell fingerprint`)

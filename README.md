@@ -1,21 +1,21 @@
 # S1shell
 
-[![Version](https://img.shields.io/badge/version-0.3.0-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.4.0-blue.svg)](CHANGELOG.md)
 [![Python](https://img.shields.io/badge/python-3.10%2B-3776ab.svg)](pyproject.toml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Quality](https://img.shields.io/badge/quality-ruff%20%7C%20strict%20mypy%20%7C%2076%20offline%20tests-brightgreen.svg)](.github/workflows/ci.yml)
+[![Quality](https://img.shields.io/badge/quality-ruff%20%7C%20strict%20mypy%20%7C%2080%20offline%20tests-brightgreen.svg)](.github/workflows/ci.yml)
 
 **S1shell** is an open-source, defensive security assessment CLI toolkit built for Kali Linux and standard Linux environments. It unifies **scoped read-only target profiling**, **passive technology & JS library fingerprinting**, **CVE / KEV / EPSS & SBOM auditing**, **multi-feed passive threat intelligence**, **deterministic hardening playbooks**, **posture drift diffing**, **multi-provider defensive AI triage**, **SARIF / HTML / Markdown reporting**, and a **read-only offline MCP server** behind a fail-closed authorization gate.
 
 ### Key Capabilities
 
 - **Fail-Closed Scope & Governance**: Allow/deny (`--exclude`) scope rules, bulk scope import (`scope import --dry-run`), DNS rebinding & private/metadata IP guards, IP-pinned HTTP/TLS connections, and a SHA-256 hash-chained `audit.log` (`audit verify`).
-- **Deep Read-Only Profiling**: DNS hygiene (`A`/`AAAA`/`CNAME`/`MX`/`NS`/`CAA`/`SPF` 10-lookup check/`DMARC`/`MTA-STS`/`TLS-RPT`/`DNSSEC`/dangling CNAME + zone-apex fallback), TLS 1.0–1.3 matrix + cipher/key/sig/SPKI pin hash, directive-level CSP/CORS/HSTS/cache/debug-header/cookie analysis, zero-extra-packet passive HTML inspection, and opt-in `OPTIONS` method & `security.txt`/`robots.txt` review.
-- **81 Passive Fingerprints + Client Library CPEs**: Identifies web servers, CDNs, WAFs, DevOps platforms, frameworks, and client-side JS libraries (`jQuery`, `Bootstrap`, `Lodash`, `Moment.js`, `DOMPurify`, `Handlebars`, `Axios`, `Swagger UI`) with automatic CPE 2.3 correlation and custom `~/.s1shell/signatures.d/*.yaml` support.
-- **CVE, KEV, EPSS, GHSA & SBOM Auditing**: NVD 2.0 + CVE.org + GitHub Security Advisories + CISA KEV + FIRST EPSS with SSVC-style `P0-IMMEDIATE`..`P3-MONITOR` priority tiers, plus zero-target-contact **OSV.dev** lockfile & CycloneDX SBOM scanning (`requirements.txt`, `package-lock.json`, `go.mod`, `Cargo.lock`, `*.cdx.json`).
-- **5-Feed Passive Threat Intelligence (`s1shell intel`)**: Cached, zero-target-contact lookups across **VirusTotal v3**, **GreyNoise Community** (noise vs benign RIOT), **urlscan.io Search API** (passive historical index only), **GitHub Advisories (GHSA)**, and **NVD**, with `0600` masked `.env` management.
+- **Deep Read-Only Profiling**: DNS hygiene (`A`/`AAAA`/`CNAME`/`MX`/`NS`/`CAA`/recursive RFC 7208 `SPF` + void lookup & loop check/`DMARC`/`MTA-STS`/`TLS-RPT`/`BIMI`/`DANE TLSA`/`DNSSEC`/dangling CNAME + expanded PSL zone-apex fallback), full X.509 certificate chain + CAA-vs-Issuer alignment + TLS 1.0–1.3 matrix/SPKI pin hash, directive-level CSP v2/CORS/HSTS/cache/debug-header/cookie analysis, zero-extra-packet passive HTML inspection (redacted secret/JWT/source-map/stack-trace detection), and opt-in `OPTIONS` method & RFC well-known (`security.txt`, `robots.txt`, OIDC `openid-configuration`, `jwks.json`, mobile trust) review.
+- **81 Passive Fingerprints, Client Library CPEs & Offline EOL DB**: Identifies web servers, CDNs, WAFs, DevOps platforms, frameworks, and client-side JS libraries (`jQuery`, `Bootstrap`, `Lodash`, `Moment.js`, `DOMPurify`, `Handlebars`, `Axios`, `Swagger UI`) with automatic CPE 2.3 correlation, offline **End-of-Life (`EOL-001`)** flagging, and custom `~/.s1shell/signatures.d/*.yaml` support.
+- **CVE, KEV, EPSS, GHSA & Multi-Ecosystem SBOM Auditing**: NVD 2.0 + CVE.org + GitHub Security Advisories + CISA KEV + FIRST EPSS with SSVC-style `P0-IMMEDIATE`..`P3-MONITOR` tiers and pure-Python **CVSS v3.1 vector scoring**, plus recursive zero-target-contact **OSV.dev** lockfile & SBOM scanning (`requirements.txt`, `uv.lock`, `poetry.lock`, `Pipfile.lock`, `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `go.mod`, `Cargo.lock`, `composer.lock`, `Gemfile.lock`, `pom.xml`, CycloneDX, and **SPDX 2.3**).
+- **7-Feed Passive Threat Intel & OSINT (`s1shell intel`)**: Cached, zero-target-contact lookups across **VirusTotal v3**, **GreyNoise Community**, **urlscan.io Search API**, **GitHub Advisories (GHSA)**, **NVD**, plus zero-API-key **Certificate Transparency (`crt.sh`)** and **RFC 7480–7484 RDAP** domain/IP registration intelligence.
 - **Deterministic Playbooks, Presets, Drift Diffs & SARIF**: Assessment presets (`web`, `api`, `strict`), transparent finding waivers (`--ignore-finding`), OWASP Top 10:2021 / ASVS / CWE / NIST 800-53 mapping, offline config snippets (`nginx`, `apache`, `caddy`, `express`, `dns`, `security.txt`), `diff --fail-on-regression`, and CI policy gates (`exit 4`).
-- **Multi-Provider Defensive AI & Read-Only MCP**: Supports **Anthropic**, local air-gapped **Ollama**, **OpenAI-compatible**, and **Google Gemini** with prompt-injection tagging (`<untrusted_telemetry>`) and reversible NDA-safe redaction (`--redact`), plus a 12-tool read-only JSON-RPC 2.0 stdio MCP server (`mcp serve`).
+- **Multi-Provider Defensive AI & Read-Only MCP**: Supports **Anthropic**, local air-gapped **Ollama**, **OpenAI-compatible**, and **Google Gemini** with prompt-injection tagging (`<untrusted_telemetry>`) and reversible NDA-safe redaction (`--redact`), plus a 14-tool read-only JSON-RPC 2.0 stdio MCP server (`mcp serve`).
 
 ```mermaid
 flowchart LR
@@ -171,9 +171,13 @@ s1shell diff ./baseline/assess.json ./results/assess.json --fail-on-regression
 Run threat-intelligence lookups and vulnerability research immediately without sending any packet to the target:
 
 ```bash
-# Passive VirusTotal + GreyNoise + urlscan.io Search lookup (cached in ~/.s1shell/cache.db)
-s1shell intel lookup example.com
-s1shell intel lookup 93.184.216.34 --sources vt,greynoise
+# Passive Certificate Transparency (crt.sh) & RDAP (zero API key, zero target contact)
+s1shell intel ct example.com --export-candidates ./scope-candidates.txt
+s1shell intel rdap example.com
+
+# Passive VirusTotal + GreyNoise + urlscan.io Search + RDAP lookup (cached in ~/.s1shell/cache.db)
+s1shell intel lookup example.com --sources vt,urlscan,rdap
+s1shell intel lookup 93.184.216.34 --sources vt,greynoise,rdap
 
 # GitHub Security Advisories (GHSA) by CVE or package ecosystem
 s1shell intel advisory --cve CVE-2023-45803
@@ -184,12 +188,12 @@ s1shell cve search --keyword "nginx 1.18" --min-cvss 7.0 --enrich
 s1shell cve get CVE-2021-23017 CVE-2023-44487 --enrich
 ```
 
-### Recipe 3: Scan Local Lockfiles or SBOMs (Zero Target Contact)
+### Recipe 3: Scan Local Lockfiles, Repositories, or SBOMs (Zero Target Contact)
 
 ```bash
 s1shell cve audit requirements.txt --enrich
-s1shell cve audit package-lock.json --enrich --fail-on HIGH
-s1shell cve audit sbom.cdx.json --enrich --format sarif --out sbom.sarif
+s1shell cve audit ./my-project --recursive --enrich --fail-on HIGH
+s1shell cve audit sbom.spdx.json --enrich --format sarif --out sbom.sarif
 ```
 
 ### Recipe 4: Bulk Scope Import & Multi-Target Batch Assessment
@@ -409,7 +413,7 @@ signatures:
 
 ### Read-Only Offline MCP Server (`s1shell mcp serve`)
 
-Exposes **12 strictly read-only offline/intel tools** over JSON-RPC 2.0 stdio (`s1shell_doctor`, `s1shell_scope_list`, `s1shell_fingerprint_from_profile`, `s1shell_cve_search`, `s1shell_cve_get`, `s1shell_cve_audit`, `s1shell_assess_diff`, `s1shell_remediate`, `s1shell_intel_lookup`, `s1shell_intel_advisory`, `s1shell_audit_list`, `s1shell_audit_verify`) with zero target-touching capability.
+Exposes **14 strictly read-only offline/intel tools** over JSON-RPC 2.0 stdio (`s1shell_doctor`, `s1shell_scope_list`, `s1shell_fingerprint_from_profile`, `s1shell_cve_search`, `s1shell_cve_get`, `s1shell_cve_audit`, `s1shell_assess_diff`, `s1shell_remediate`, `s1shell_intel_lookup`, `s1shell_intel_advisory`, `s1shell_intel_ct`, `s1shell_intel_rdap`, `s1shell_audit_list`, `s1shell_audit_verify`) with zero target-touching capability.
 
 Example MCP client configuration:
 
@@ -452,7 +456,7 @@ Variables resolve in order: **process environment > project `./.env` > `~/.s1she
 | `s1shell assess <target \| --targets-file>` | Scoped target + NVD/KEV/EPSS (+ optional VT/GN/urlscan with `--intel`) | Unified profile, fingerprint, CVE, intel, posture, playbook, & report bundle |
 | `s1shell scope add \| import \| list \| check \| remove \| expire` | DNS on `check` only | Manage authorized allow/exclude rules & bulk imports in `scope.yaml` |
 | `s1shell cve search \| get \| audit \| cache clear` | Public NVD / CVE.org / OSV.dev / GHSA / KEV / EPSS | CVE lookup, SSVC priority triage, & lockfile/SBOM auditing |
-| `s1shell intel env \| lookup \| advisory` | Public VT / GreyNoise / urlscan Search / GitHub GHSA | Zero-target-contact passive threat intel & `.env` key manager |
+| `s1shell intel env \| lookup \| advisory \| ct \| rdap` | Public VT / GreyNoise / urlscan Search / GHSA / crt.sh / RDAP | Zero-target-contact passive threat intel, CT logs, RDAP, & `.env` key manager |
 | `s1shell profile <target>` | Single target (1 GET + TLS + opt-in checks) | DNS hygiene, TLS/SPKI/ciphers, headers, cookies, cache, HTML, `OPTIONS` |
 | `s1shell fingerprint [<target> \| --from-profile FILE]` | None (`--from-profile`) or 1 GET | Passive server/CDN/WAF/JS-library identification with CPE 2.3 |
 | `s1shell remediate <assess.json>` | None (offline) | Deterministic stack-tailored hardening config generator |

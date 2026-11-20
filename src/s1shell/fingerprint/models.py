@@ -19,6 +19,9 @@ class FingerprintMatch:
     version: str | None = None
     evidence: list[str] = field(default_factory=list)
     cpe: str | None = None
+    eol: bool = False
+    eol_note: str | None = None
+    eol_recommended: str | None = None
 
 
 @dataclass(frozen=True)

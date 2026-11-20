@@ -2,6 +2,24 @@
 
 All notable changes to S1shell will be documented in this file.
 
+## [0.4.0] - 2026-11-20
+
+### Added — Deep Passive OSINT, Crypto/Email/Identity Profiling, & Supply-Chain v2
+- **Passive OSINT Depth (`s1shell intel ct` & `s1shell intel rdap` — Zero API Key / Zero Target Contact)**:
+  - `s1shell intel ct <domain> [--export-candidates FILE]`: Queries public Certificate Transparency logs (`crt.sh`), deduplicates passive SAN subdomains and wildcard SANs, summarizes active/expired certs and CA issuers, caches in SQLite, and optionally writes a candidate target list for authorization review before `scope import`.
+  - `s1shell intel rdap <domain|ip>`: Queries RFC 7480–7484 RDAP registration data (registrar, organization, transfer lock status, DNSSEC delegation, domain age & expiry countdown, IP CIDR allocation, abuse contact) — also integrated into `intel lookup --sources ...,rdap` and `assess --intel` (`INTEL-RDAP-EXPIRING`, `INTEL-RDAP-UNLOCKED`, `INTEL-ORIGIN-DRIFT`).
+  - Exposed `s1shell_intel_ct` and `s1shell_intel_rdap` on the read-only stdio MCP server (14 tools total).
+- **Deep Read-Only Target Profiling (`profile` & `fingerprint` v2)**:
+  - **Full X.509 Chain & CAA-vs-Issuer Alignment**: Parses full presented TLS certificate chains (detecting missing intermediates, expiring/expired intermediates, SHA-1 intermediates, and chain order mismatches -> `TLS-CHAIN`) and cross-checks leaf cert issuers against DNS `CAA` records (`TLS-CAA-MISMATCH`).
+  - **Recursive RFC 7208 SPF Expansion, BIMI, DANE/TLSA & Expanded PSL**: Bounded recursive SPF `include:`/`redirect=` expansion catching cumulative >10 DNS lookups, >2 void lookups, loops, `+all`, and overly broad IPv4 CIDRs (`DNS-SPF-RECURSIVE`, `DNS-SPF-PERMISSIVE`), plus passive BIMI (`default._bimi`), DANE/TLSA (`_443._tcp`), and ~70 multi-part ccTLD Public Suffix entries (e.g. `gov.ph`, `edu.ph`, `co.id`, `com.my`).
+  - **RFC Well-Known OIDC, JWKS & Mobile Trust Audit**: Opt-in `--well-known` now also reviews `/.well-known/openid-configuration` (`OIDC-001`), `/.well-known/jwks.json` (`JWKS-PRIV` critical private-key leak check & `JWKS-WEAK`), `assetlinks.json`, and `apple-app-site-association`.
+  - **Zero-Extra-Packet Passive Exposure & JWT Inspector + CSP v2**: Detects and **redacts** accidentally exposed credentials/API keys/PEM headers/DB URIs (`LEAK-SECRET`), passively audits JWT headers/claims in HTML/cookies/headers (`LEAK-JWT`), flags exposed JS source maps (`LEAK-SOURCEMAP`) and framework stack traces (`LEAK-TRACE`), and checks wildcard `blob:`/`https:` script-src CSP directives.
+  - **Offline End-of-Life (EOL) Software Database (`eol.yaml`)**: Flags unmaintained/EOL versions of NGINX, Apache, PHP, Python, Node.js, OpenSSL, jQuery, Bootstrap, AngularJS, WordPress, Drupal, Tomcat, IIS, Lodash, Moment.js, and HAProxy (`EOL-001`, CWE-1104) with zero network traffic.
+- **Supply-Chain & SBOM Auditing v2 (`s1shell cve audit`)**:
+  - Added pure-Python **FIRST CVSS v3.0/v3.1 Base Score Calculator** (`cve/cvss.py`) fixing numeric severity extraction from OSV CVSS vector strings.
+  - Added parsers for `uv.lock`, `poetry.lock`, `Pipfile.lock`, `yarn.lock`, `pnpm-lock.yaml`, `composer.lock`, `Gemfile.lock`, `pom.xml`, and **SPDX 2.3 JSON SBOMs**.
+  - Added `--recursive` directory scanning (`s1shell cve audit ./repo --recursive`), per-file SARIF 2.1.0 locations, `unpatched_count`, and deterministic ecosystem-specific `upgrade_commands`.
+
 ## [0.3.0] - 2026-11-20
 
 ### Added — Passive Multi-Feed Threat Intelligence (`s1shell intel`)

@@ -23,7 +23,13 @@ from s1shell.cve.models import CVESearchResult, DependencyAuditResult
 from s1shell.doctor import DoctorReport
 from s1shell.errors import ValidationError
 from s1shell.fingerprint.models import FingerprintResult
-from s1shell.intel.models import GitHubAdvisoryResult, IntelEnvStatus, IntelLookupResult
+from s1shell.intel.models import (
+    CTLookupResult,
+    GitHubAdvisoryResult,
+    IntelEnvStatus,
+    IntelLookupResult,
+    RDAPLookupResult,
+)
 from s1shell.models import dumps_json
 from s1shell.profile.models import ProfileResult
 from s1shell.report.sarif import render_dependency_sarif
@@ -1193,6 +1199,13 @@ def render_intel_lookup(
                 f"servers=`{', '.join(us.observed_servers) or 'none'}`, "
                 f"ips=`{', '.join(us.observed_ips[:5]) or 'none'}`"
             )
+        if result.rdap:
+            rd = result.rdap
+            lines.append(
+                f"- **RDAP ({rd.indicator_type}):** registrar=`{rd.registrar or '—'}`, "
+                f"org=`{rd.organization or '—'}`, expires=`{rd.expires_at or '—'}`, "
+                f"locked=`{rd.transfer_locked}`"
+            )
         if result.warnings:
             lines.extend(["", "## Warnings", ""])
             for w in result.warnings:
@@ -1227,6 +1240,13 @@ def render_intel_lookup(
             "urlscan.io",
             f"total={us.total_results} | servers={', '.join(us.observed_servers) or 'none'} | "
             f"ips={', '.join(us.observed_ips[:5]) or 'none'}",
+        )
+    if result.rdap:
+        rd = result.rdap
+        tbl.add_row(
+            "RDAP",
+            f"registrar={rd.registrar or '—'} | org={rd.organization or '—'} | "
+            f"expires={rd.expires_at or '—'} | locked={rd.transfer_locked}",
         )
     if result.warnings:
         tbl.add_row("Warnings", "\n".join(result.warnings))
@@ -1276,4 +1296,129 @@ def render_ghsa_advisories(
         cvss = f"{a.cvss_score:.1f}" if a.cvss_score is not None else "—"
         summ = a.summary[:120] + ("..." if len(a.summary) > 120 else "")
         tbl.add_row(a.ghsa_id, a.cve_id or "—", a.severity, cvss, patched, summ)
+    _emit_tables([tbl], console=console, out_file=out_file, stdout=stdout)
+
+
+def render_ct_lookup(
+    result: CTLookupResult,
+    *,
+    fmt: str,
+    console: Console,
+    out_file: Path | None = None,
+    stdout: TextIO | None = None,
+) -> None:
+    """Render passive Certificate Transparency (crt.sh) lookup results."""
+    norm = _require_format(fmt, ("table", "json", "md"), command="intel ct")
+    if norm == "json":
+        write_or_print(dumps_json(result), out_file=out_file, stdout=stdout)
+        return
+    if norm == "md":
+        lines = [
+            f"# Passive Certificate Transparency: `{result.domain}` (cached={result.cached})",
+            "",
+            (
+                f"- **Certificates:** total={result.total_certificates} "
+                f"(active={result.active_certificates}, expired={result.expired_certificates})"
+            ),
+            f"- **Unique Subdomains:** {len(result.unique_subdomains)}",
+            f"- **Wildcard SANs:** `{', '.join(result.wildcard_sans[:10]) or 'none'}`",
+            f"- **Observed CAs:** `{', '.join(result.issuers[:6]) or 'none'}`",
+        ]
+        if result.exported_candidates_file:
+            lines.append(f"- **Exported Scope Candidates:** `{result.exported_candidates_file}`")
+        if result.unique_subdomains:
+            lines.extend(["", "## Discovered Passive Subdomains", ""])
+            for sub in result.unique_subdomains[:50]:
+                lines.append(f"- `{sub}`")
+        write_or_print("\n".join(lines), out_file=out_file, stdout=stdout)
+        return
+
+    tables: list[Table] = []
+    summary = Table(title=f"Certificate Transparency (crt.sh): {result.domain}")
+    summary.add_column("Metric", style="cyan", no_wrap=True)
+    summary.add_column("Value")
+    summary.add_row(
+        "Certificates",
+        f"total={result.total_certificates} "
+        f"(active={result.active_certificates}, expired={result.expired_certificates}, "
+        f"cached={result.cached})",
+    )
+    summary.add_row("Unique Subdomains", str(len(result.unique_subdomains)))
+    summary.add_row("Wildcard SANs", ", ".join(result.wildcard_sans[:8]) or "none")
+    summary.add_row("Issuers", ", ".join(result.issuers[:4]) or "none")
+    if result.exported_candidates_file:
+        summary.add_row("Exported Candidates", result.exported_candidates_file)
+    tables.append(summary)
+
+    if result.unique_subdomains:
+        sub_tbl = Table(title="Passive SAN Subdomains (top 30)")
+        sub_tbl.add_column("Hostname", style="cyan")
+        for sub in result.unique_subdomains[:30]:
+            sub_tbl.add_row(sub)
+        tables.append(sub_tbl)
+
+    _emit_tables(tables, console=console, out_file=out_file, stdout=stdout)
+
+
+def render_rdap_lookup(
+    result: RDAPLookupResult,
+    *,
+    fmt: str,
+    console: Console,
+    out_file: Path | None = None,
+    stdout: TextIO | None = None,
+) -> None:
+    """Render RFC 7480–7484 RDAP domain or IP/ASN registration record."""
+    norm = _require_format(fmt, ("table", "json", "md"), command="intel rdap")
+    if norm == "json":
+        write_or_print(dumps_json(result), out_file=out_file, stdout=stdout)
+        return
+    if norm == "md":
+        lines = [
+            f"# RDAP Registration: `{result.indicator}` ({result.indicator_type})",
+            "",
+            f"- **Handle / Name:** `{result.handle or '—'}` / `{result.name or '—'}`",
+            f"- **Registrar / Org:** `{result.registrar or '—'}` / `{result.organization or '—'}`",
+            f"- **Country:** `{result.country or '—'}`",
+            f"- **Statuses:** `{', '.join(result.statuses) or 'none'}`",
+            (
+                f"- **Transfer Locked:** `{result.transfer_locked}` | "
+                f"**DNSSEC Signed:** `{result.dnssec_signed}`"
+            ),
+            f"- **Created:** `{result.created_at or '—'}` (age={result.domain_age_days}d)",
+            f"- **Expires:** `{result.expires_at or '—'}` (remaining={result.days_until_expiry}d)",
+            (
+                f"- **CIDR / Range:** `{result.cidr or '—'}` "
+                f"({result.start_address or '—'} - {result.end_address or '—'})"
+            ),
+            f"- **Abuse Contact:** `{result.abuse_contact or '—'}`",
+        ]
+        write_or_print("\n".join(lines), out_file=out_file, stdout=stdout)
+        return
+
+    tbl = Table(title=f"RDAP Registration: {result.indicator} ({result.indicator_type})")
+    tbl.add_column("Field", style="cyan", no_wrap=True)
+    tbl.add_column("Value")
+    tbl.add_row("Handle / Name", f"{result.handle or '—'} / {result.name or '—'}")
+    tbl.add_row("Registrar / Org", f"{result.registrar or '—'} / {result.organization or '—'}")
+    tbl.add_row("Country", result.country or "—")
+    tbl.add_row("Statuses", ", ".join(result.statuses) or "—")
+    tbl.add_row(
+        "Locks / DNSSEC",
+        f"transfer_locked={result.transfer_locked} | dnssec_signed={result.dnssec_signed}",
+    )
+    tbl.add_row(
+        "Dates",
+        f"created={result.created_at or '—'} (age={result.domain_age_days}d) | "
+        f"expires={result.expires_at or '—'} (in {result.days_until_expiry}d)",
+    )
+    if result.nameservers:
+        tbl.add_row("Nameservers", ", ".join(result.nameservers[:6]))
+    if result.cidr or result.start_address:
+        tbl.add_row(
+            "IP Block",
+            f"{result.cidr or '—'} ({result.start_address or '—'} - {result.end_address or '—'})",
+        )
+    tbl.add_row("Abuse Contact", result.abuse_contact or "—")
+    tbl.add_row("Cached", str(result.cached))
     _emit_tables([tbl], console=console, out_file=out_file, stdout=stdout)

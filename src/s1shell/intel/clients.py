@@ -11,8 +11,11 @@ from s1shell.config import RuntimeConfig
 from s1shell.errors import NetworkError
 from s1shell.http import build_intel_client
 from s1shell.intel.models import (
+    CTCertEntry,
+    CTLookupResult,
     GitHubAdvisory,
     GreyNoiseIntel,
+    RDAPLookupResult,
     URLScanEntry,
     URLScanSummary,
     VirusTotalIntel,
@@ -353,3 +356,313 @@ class GitHubAdvisoryClient:
         if not isinstance(data, list):
             raise NetworkError("GitHub Advisories API returned unexpected payload.")
         return [item for item in data if isinstance(item, dict)]
+
+
+def _parse_iso_dt(raw: str | None) -> datetime | None:
+    if not raw or not raw.strip():
+        return None
+    cleaned = raw.strip()
+    if cleaned.endswith("Z"):
+        cleaned = cleaned[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(cleaned)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _extract_rdap_vcard_field(entity: dict[str, Any], field_name: str) -> str | None:
+    vcard = entity.get("vcardArray")
+    if not isinstance(vcard, list) or len(vcard) < 2 or not isinstance(vcard[1], list):
+        return None
+    for row in vcard[1]:
+        if isinstance(row, list) and len(row) >= 4 and str(row[0]).lower() == field_name:
+            val = row[3]
+            if isinstance(val, str) and val.strip():
+                return val.strip()
+    return None
+
+
+def parse_crtsh_payload(
+    payload: Any,
+    *,
+    domain: str,
+    cached: bool = False,
+    now: datetime | None = None,
+) -> CTLookupResult:
+    """Parse crt.sh JSON certificate list into deduplicated passive SAN & issuer intelligence."""
+    ref_now = now if now is not None else datetime.now(timezone.utc)
+    dom_low = domain.strip().lower().rstrip(".")
+    if not isinstance(payload, list):
+        return CTLookupResult(domain=dom_low, cached=cached)
+
+    subdomains: set[str] = set()
+    wildcards: set[str] = set()
+    issuers: list[str] = []
+    seen_issuers: set[str] = set()
+    recent: list[CTCertEntry] = []
+    seen_ids: set[int] = set()
+    active_count = 0
+    expired_count = 0
+
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        raw_id = item.get("id")
+        cert_id = int(raw_id) if isinstance(raw_id, int) else None
+        if cert_id is not None and cert_id in seen_ids:
+            continue
+        if cert_id is not None:
+            seen_ids.add(cert_id)
+
+        cn = str(item.get("common_name") or "").strip().lower()
+        name_val = str(item.get("name_value") or "")
+        issuer_name = str(item.get("issuer_name") or "").strip()
+        not_before = str(item.get("not_before") or "").strip() or None
+        not_after = str(item.get("not_after") or "").strip() or None
+
+        na_dt = _parse_iso_dt(not_after)
+        is_expired = bool(na_dt is not None and na_dt < ref_now)
+        if is_expired:
+            expired_count += 1
+        else:
+            active_count += 1
+
+        if issuer_name and issuer_name not in seen_issuers and len(issuers) < 20:
+            seen_issuers.add(issuer_name)
+            issuers.append(issuer_name[:160])
+
+        raw_names = [line.strip().lower() for line in name_val.splitlines() if line.strip()]
+        if cn and cn not in raw_names:
+            raw_names.insert(0, cn)
+
+        clean_sans: list[str] = []
+        for candidate in raw_names:
+            if not candidate or " " in candidate or "@" in candidate:
+                continue
+            cleaned = candidate.rstrip(".")
+            if cleaned.startswith("*."):
+                base = cleaned[2:]
+                if base == dom_low or base.endswith("." + dom_low):
+                    wildcards.add(cleaned)
+                    clean_sans.append(cleaned)
+            elif cleaned == dom_low or cleaned.endswith("." + dom_low):
+                subdomains.add(cleaned)
+                clean_sans.append(cleaned)
+
+        if len(recent) < 25:
+            recent.append(
+                CTCertEntry(
+                    cert_id=cert_id,
+                    common_name=cn,
+                    san_names=clean_sans[:15],
+                    issuer_name=issuer_name[:160],
+                    not_before=not_before,
+                    not_after=not_after,
+                    expired=is_expired,
+                )
+            )
+
+    return CTLookupResult(
+        domain=dom_low,
+        cached=cached,
+        total_certificates=len(seen_ids) if seen_ids else active_count + expired_count,
+        unique_subdomains=sorted(subdomains)[:250],
+        wildcard_sans=sorted(wildcards)[:50],
+        issuers=issuers,
+        active_certificates=active_count,
+        expired_certificates=expired_count,
+        recent_certificates=recent,
+    )
+
+
+def parse_rdap_payload(
+    payload: dict[str, Any],
+    *,
+    indicator: str,
+    indicator_type: str,
+    source_url: str | None = None,
+    cached: bool = False,
+    now: datetime | None = None,
+) -> RDAPLookupResult:
+    """Parse RFC 7483 RDAP domain or IP network JSON payload."""
+    ref_now = now if now is not None else datetime.now(timezone.utc)
+    handle = str(payload.get("handle") or "").strip() or None
+    name = str(payload.get("name") or payload.get("ldhName") or "").strip() or None
+    country = str(payload.get("country") or "").strip().upper() or None
+    statuses = [str(s).strip() for s in payload.get("status", []) if str(s).strip()]
+
+    transfer_locked: bool | None = None
+    if indicator_type == "domain" and statuses:
+        low_statuses = {s.lower().replace(" ", "") for s in statuses}
+        transfer_locked = any(
+            s in low_statuses for s in {"clienttransferprohibited", "servertransferprohibited"}
+        )
+
+    dnssec_signed: bool | None = None
+    sec_dns = payload.get("secureDNS")
+    if isinstance(sec_dns, dict) and "delegationSigned" in sec_dns:
+        dnssec_signed = bool(sec_dns.get("delegationSigned"))
+
+    created_at: str | None = None
+    updated_at: str | None = None
+    expires_at: str | None = None
+    for ev in payload.get("events", []) or []:
+        if not isinstance(ev, dict):
+            continue
+        action = str(ev.get("eventAction") or "").strip().lower()
+        date_val = str(ev.get("eventDate") or "").strip()
+        if not date_val:
+            continue
+        if action == "registration" and created_at is None:
+            created_at = date_val
+        elif action in {"last changed", "last update of rdap database"} and updated_at is None:
+            updated_at = date_val
+        elif action == "expiration" and expires_at is None:
+            expires_at = date_val
+
+    created_dt = _parse_iso_dt(created_at)
+    expires_dt = _parse_iso_dt(expires_at)
+    age_days = max(0, (ref_now - created_dt).days) if created_dt is not None else None
+    days_until_expiry = (expires_dt - ref_now).days if expires_dt is not None else None
+
+    nameservers: list[str] = []
+    for ns in payload.get("nameservers", []) or []:
+        if isinstance(ns, dict) and ns.get("ldhName"):
+            ns_val = str(ns["ldhName"]).strip().lower().rstrip(".")
+            if ns_val and ns_val not in nameservers:
+                nameservers.append(ns_val)
+
+    registrar: str | None = None
+    organization: str | None = None
+    abuse_contact: str | None = None
+
+    def _walk_entities(entities: Any) -> None:
+        nonlocal registrar, organization, abuse_contact
+        if not isinstance(entities, list):
+            return
+        for ent in entities:
+            if not isinstance(ent, dict):
+                continue
+            roles = {str(r).strip().lower() for r in ent.get("roles", []) if str(r).strip()}
+            fn = _extract_rdap_vcard_field(ent, "fn")
+            email = _extract_rdap_vcard_field(ent, "email")
+            if "registrar" in roles and registrar is None and fn:
+                registrar = fn
+            if ("registrant" in roles or "administrative" in roles) and organization is None and fn:
+                organization = fn
+            if abuse_contact is None and email and ("abuse" in roles or "abuse" in email.lower()):
+                abuse_contact = email
+            _walk_entities(ent.get("entities"))
+
+    _walk_entities(payload.get("entities"))
+
+    cidr: str | None = None
+    cidr_list = payload.get("cidr0_cidrs")
+    if isinstance(cidr_list, list) and cidr_list:
+        first = cidr_list[0]
+        if isinstance(first, dict):
+            prefix = first.get("v4prefix") or first.get("v6prefix")
+            length = first.get("length")
+            if prefix and length is not None:
+                cidr = f"{prefix}/{length}"
+    start_addr = str(payload.get("startAddress") or "").strip() or None
+    end_addr = str(payload.get("endAddress") or "").strip() or None
+
+    return RDAPLookupResult(
+        indicator=indicator,
+        indicator_type=indicator_type,
+        cached=cached,
+        handle=handle,
+        name=name,
+        registrar=registrar,
+        organization=organization,
+        country=country,
+        statuses=statuses,
+        transfer_locked=transfer_locked,
+        dnssec_signed=dnssec_signed,
+        created_at=created_at,
+        updated_at=updated_at,
+        expires_at=expires_at,
+        domain_age_days=age_days,
+        days_until_expiry=days_until_expiry,
+        nameservers=nameservers,
+        cidr=cidr,
+        start_address=start_addr,
+        end_address=end_addr,
+        abuse_contact=abuse_contact,
+        source_url=source_url,
+    )
+
+
+class CrtShClient:
+    """Strictly passive Certificate Transparency log client via crt.sh (zero target contact)."""
+
+    def __init__(
+        self,
+        cfg: RuntimeConfig,
+        *,
+        transport: httpx.BaseTransport | None = None,
+    ) -> None:
+        self._cfg = cfg
+        self._transport = transport
+
+    def fetch_domain(self, domain: str) -> list[dict[str, Any]]:
+        """Query `https://crt.sh/?q=%.<domain>&output=json` passively."""
+        cleaned = domain.strip().lower().rstrip(".")
+        params = {"q": f"%.{cleaned}", "output": "json"}
+        try:
+            with build_intel_client(self._cfg, transport=self._transport) as client:
+                resp = client.get(self._cfg.crtsh_api_url, params=params)
+        except httpx.HTTPError as exc:
+            raise NetworkError(f"crt.sh CT log request failed: {exc}") from exc
+        if resp.status_code == 404:
+            return []
+        if resp.status_code != 200:
+            raise NetworkError(f"crt.sh CT log returned HTTP {resp.status_code}")
+        text = resp.text.strip()
+        if not text:
+            return []
+        try:
+            data = resp.json()
+        except ValueError as exc:
+            raise NetworkError(f"crt.sh returned invalid JSON: {exc}") from exc
+        if not isinstance(data, list):
+            return []
+        return [item for item in data if isinstance(item, dict)]
+
+
+class RDAPClient:
+    """Read-only RFC 7480–7484 RDAP registration lookup client (domain or IP, zero API key)."""
+
+    def __init__(
+        self,
+        cfg: RuntimeConfig,
+        *,
+        transport: httpx.BaseTransport | None = None,
+    ) -> None:
+        self._cfg = cfg
+        self._transport = transport
+
+    def fetch(self, indicator: str, *, indicator_type: str) -> tuple[dict[str, Any], str]:
+        """Fetch RDAP JSON for a domain or IP via RFC 7484 bootstrap (`follow_redirects=True`)."""
+        endpoint = "ip" if indicator_type == "ip" else "domain"
+        url = f"{self._cfg.rdap_base_url.rstrip('/')}/{endpoint}/{indicator.strip()}"
+        try:
+            with build_intel_client(
+                self._cfg, transport=self._transport, follow_redirects=True
+            ) as client:
+                resp = client.get(
+                    url, headers={"Accept": "application/rdap+json, application/json"}
+                )
+        except httpx.HTTPError as exc:
+            raise NetworkError(f"RDAP request failed: {exc}") from exc
+        if resp.status_code != 200:
+            raise NetworkError(f"RDAP server returned HTTP {resp.status_code}")
+        try:
+            data: dict[str, Any] = resp.json()
+        except ValueError as exc:
+            raise NetworkError(f"RDAP server returned invalid JSON: {exc}") from exc
+        return data, str(resp.url)

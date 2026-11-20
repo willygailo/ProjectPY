@@ -121,11 +121,12 @@ class CVESearchResult:
 
 @dataclass(frozen=True)
 class DependencyPackage:
-    """Single pinned software package parsed from a lockfile or CycloneDX SBOM."""
+    """Single pinned software package parsed from a lockfile or SBOM."""
 
     ecosystem: str  # PyPI | npm | Go | crates.io | Maven | NuGet | Packagist | RubyGems
     name: str
     version: str
+    source_file: str | None = None
 
 
 @dataclass(frozen=True)
@@ -147,11 +148,12 @@ class DependencyVuln:
     epss_score: float | None = None
     priority: str = "P3-MONITOR"
     references: list[str] = field(default_factory=list)
+    source_file: str | None = None
 
 
 @dataclass(frozen=True)
 class DependencyAuditResult:
-    """Canonical output envelope for `s1shell cve audit <lockfile-or-sbom>`."""
+    """Canonical output envelope for `s1shell cve audit <lockfile-sbom-or-dir>`."""
 
     source_file: str
     format_detected: str
@@ -159,6 +161,9 @@ class DependencyAuditResult:
     vulnerable_packages: int
     cached: bool
     vulnerabilities: list[DependencyVuln] = field(default_factory=list)
+    source_files: list[str] = field(default_factory=list)
+    upgrade_commands: list[str] = field(default_factory=list)
+    unpatched_count: int = 0
     schema_version: str = SCHEMA_VERSION
     tool_version: str = __version__
     generated_at_utc: str = field(default_factory=utc_now_iso)

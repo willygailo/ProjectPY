@@ -17,9 +17,134 @@ from cryptography.hazmat.primitives.asymmetric import dsa, ec, ed448, ed25519, r
 from cryptography.x509.oid import ExtensionOID, ObjectIdentifier
 
 from s1shell.errors import NetworkError
-from s1shell.profile.models import TLSResult
+from s1shell.profile.models import CertChainEntry, TLSResult
 
 _TLS_FEATURE_OID = ObjectIdentifier("1.3.6.1.5.5.7.1.24")
+
+_ISSUER_CAA_HINTS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("let's encrypt", ("letsencrypt.org",)),
+    ("lets encrypt", ("letsencrypt.org",)),
+    ("digicert", ("digicert.com", "geotrust.com", "thawte.com", "rapidssl.com")),
+    ("geotrust", ("digicert.com", "geotrust.com")),
+    ("thawte", ("digicert.com", "thawte.com")),
+    ("rapidssl", ("digicert.com", "rapidssl.com")),
+    ("sectigo", ("sectigo.com", "comodoca.com")),
+    ("comodo", ("comodoca.com", "sectigo.com")),
+    ("zerossl", ("sectigo.com", "zerossl.com")),
+    ("google trust", ("pki.goog",)),
+    ("gts ca", ("pki.goog",)),
+    ("globalsign", ("globalsign.com",)),
+    ("amazon", ("amazon.com", "amazontrust.com", "awstrust.com", "amazonaws.com")),
+    ("entrust", ("entrust.net", "entrust.com")),
+    ("godaddy", ("godaddy.com", "starfieldtech.com")),
+    ("starfield", ("starfieldtech.com", "godaddy.com")),
+    ("ssl.com", ("ssl.com",)),
+    ("identrust", ("identrust.com",)),
+    ("buypass", ("buypass.com",)),
+    ("harica", ("harica.gr",)),
+    ("actalis", ("actalis.it",)),
+    ("certum", ("certum.pl",)),
+    ("usertrust", ("sectigo.com", "comodoca.com")),
+    ("cloudflare", ("digicert.com", "letsencrypt.org", "pki.goog", "ssl.com", "sectigo.com")),
+)
+
+
+def check_caa_issuer_alignment(caa_records: list[str], issuer: str | None) -> list[str]:
+    """Cross-check whether a TLS leaf certificate issuer aligns with DNS CAA `issue` records."""
+    if not caa_records or not issuer:
+        return []
+    allowed_cas: list[str] = []
+    deny_all = False
+    for rec in caa_records:
+        parts = rec.strip().split(None, 2)
+        if len(parts) < 3:
+            continue
+        tag = parts[1].strip().lower()
+        val = parts[2].strip().strip('"').strip().lower()
+        ca_domain = val.split(";", 1)[0].strip()
+        if tag in {"issue", "issuewild"}:
+            if ca_domain == ";":
+                deny_all = True
+            elif ca_domain:
+                allowed_cas.append(ca_domain)
+
+    if deny_all and not allowed_cas:
+        return [
+            'DNS CAA policy contains `issue ";"` (forbids issuance), yet a certificate is served.'
+        ]
+    if not allowed_cas:
+        return []
+
+    issuer_low = issuer.lower()
+    expected_domains: tuple[str, ...] | None = None
+    for needle, ca_domains in _ISSUER_CAA_HINTS:
+        if needle in issuer_low:
+            expected_domains = ca_domains
+            break
+
+    if expected_domains is None:
+        # Unknown/private CA: check if any CAA domain stem appears directly in the issuer DN.
+        for ca in allowed_cas:
+            stem = ca.split(".")[0]
+            if len(stem) >= 4 and stem in issuer_low:
+                return []
+        return []
+
+    if any(
+        any(exp == ca or ca.endswith("." + exp) or exp.endswith("." + ca) for ca in allowed_cas)
+        for exp in expected_domains
+    ):
+        return []
+
+    return [
+        f"TLS leaf issuer ({issuer[:80]}) does not match DNS CAA authorized CAs "
+        f"({', '.join(sorted(set(allowed_cas))[:5])})."
+    ]
+
+
+def analyze_cert_chain(der_chain: list[bytes]) -> tuple[list[CertChainEntry], list[str]]:
+    """Parse DER-encoded TLS cert chain and flag ordering, expiry, or weak-sig issues."""
+    entries: list[CertChainEntry] = []
+    issues: list[str] = []
+    for idx, der in enumerate(der_chain):
+        try:
+            parsed = _parse_x509_der(der)
+        except Exception:
+            issues.append(f"Failed to parse X.509 certificate at chain index {idx}.")
+            continue
+        entries.append(
+            CertChainEntry(
+                subject=parsed.subject or "unknown",
+                issuer=parsed.issuer or "unknown",
+                not_after=parsed.not_after,
+                days_remaining=parsed.days_remaining,
+                key_type=parsed.key_type,
+                key_size=parsed.key_size,
+                signature_algorithm=parsed.signature_algorithm,
+                is_self_signed=parsed.is_self_signed,
+            )
+        )
+
+    if len(entries) == 1 and not entries[0].is_self_signed:
+        issues.append("Server sent only leaf certificate without intermediate CA chain.")
+
+    for idx, cert in enumerate(entries[1:], start=1):
+        if cert.days_remaining is not None and cert.days_remaining < 0:
+            issues.append(f"Chain certificate #{idx} ({cert.subject[:60]}) is expired.")
+        elif cert.days_remaining is not None and cert.days_remaining < 30:
+            issues.append(
+                f"Chain certificate #{idx} ({cert.subject[:60]}) expires in {cert.days_remaining}d."
+            )
+        if cert.signature_algorithm in {"md5", "sha1"} and not cert.is_self_signed:
+            alg_up = cert.signature_algorithm.upper()
+            issues.append(f"Intermediate certificate #{idx} uses weak {alg_up} signature.")
+
+    for idx in range(len(entries) - 1):
+        if entries[idx].issuer != entries[idx + 1].subject:
+            issues.append(f"Certificate chain order mismatch between position {idx} and {idx + 1}.")
+            break
+
+    return entries, issues
 
 
 @dataclass(frozen=True)
@@ -185,7 +310,7 @@ def _single_handshake(
     verify: bool,
     tls_version: ssl.TLSVersion | None = None,
     legacy_probe: bool = False,
-) -> tuple[str | None, str | None, str | None, bytes | None]:
+) -> tuple[str | None, str | None, str | None, bytes | None, list[bytes]]:
     ctx = (
         ssl.create_default_context(cafile=cafile)
         if verify
@@ -215,11 +340,24 @@ def _single_handshake(
     ):
         cipher = tls_sock.cipher()
         cipher_name = cipher[0] if cipher else None
+        leaf_der = tls_sock.getpeercert(binary_form=True)
+        chain_der: list[bytes] = []
+        get_chain_fn = getattr(
+            tls_sock, "get_verified_chain" if verify else "get_unverified_chain", None
+        )
+        if callable(get_chain_fn):
+            with contextlib.suppress(Exception):
+                raw_chain = get_chain_fn()
+                if isinstance(raw_chain, list):
+                    chain_der = [bytes(b) for b in raw_chain if isinstance(b, (bytes, bytearray))]
+        if not chain_der and leaf_der:
+            chain_der = [leaf_der]
         return (
             tls_sock.version(),
             cipher_name,
             tls_sock.selected_alpn_protocol(),
-            tls_sock.getpeercert(binary_form=True),
+            leaf_der,
+            chain_der,
         )
 
 
@@ -246,7 +384,7 @@ def _probe_tls_versions(
             client_blocked.append(label)
             continue
         try:
-            negotiated, _, _, _ = _single_handshake(
+            negotiated, _, _, _, _ = _single_handshake(
                 host=host,
                 pinned_ip=pinned_ip,
                 port=port,
@@ -291,9 +429,10 @@ def inspect_tls(
     cipher_name: str | None = None
     alpn_proto: str | None = None
     der_bytes: bytes | None = None
+    der_chain: list[bytes] = []
 
     try:
-        negotiated, cipher_name, alpn_proto, der_bytes = _single_handshake(
+        negotiated, cipher_name, alpn_proto, der_bytes, der_chain = _single_handshake(
             host=host,
             pinned_ip=pinned_ip,
             port=port,
@@ -307,7 +446,7 @@ def inspect_tls(
         verified = False
         verification_error = str(exc)
         try:
-            negotiated, cipher_name, alpn_proto, der_bytes = _single_handshake(
+            negotiated, cipher_name, alpn_proto, der_bytes, der_chain = _single_handshake(
                 host=host,
                 pinned_ip=pinned_ip,
                 port=port,
@@ -322,6 +461,7 @@ def inspect_tls(
         raise NetworkError(f"TLS handshake failed for '{host}': {exc}") from exc
 
     cert_meta = _parse_x509_der(der_bytes) if der_bytes else _ParsedX509()
+    chain_entries, chain_issues = analyze_cert_chain(der_chain) if der_chain else ([], [])
 
     client_blocked: list[str] = []
     if check_versions:
@@ -364,5 +504,8 @@ def inspect_tls(
         spki_sha256=cert_meta.spki_sha256,
         cipher_weaknesses=cipher_weaknesses,
         client_blocked_versions=client_blocked,
+        chain=chain_entries,
+        chain_length=len(chain_entries),
+        chain_issues=chain_issues,
     )
     return result, alpn_proto

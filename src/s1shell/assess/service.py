@@ -288,6 +288,7 @@ class AssessService:
             intel_res = self.intel_service.lookup(
                 prof.url,
                 pinned_ip=prof.pinned_ip,
+                sources=("vt", "greynoise", "urlscan", "rdap"),
                 offline=offline_cve,
             )
 

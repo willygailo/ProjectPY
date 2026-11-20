@@ -77,17 +77,12 @@ def build_sarif_payload(
             }
 
         msg = f"{title}. Evidence: {evidence}" if evidence else title
+        loc_uri = str(finding.get("uri") or target_uri or "target://unknown")
         res_entry: dict[str, Any] = {
             "ruleId": rule_id,
             "level": _SEV_TO_LEVEL.get(severity, "note"),
             "message": {"text": msg},
-            "locations": [
-                {
-                    "physicalLocation": {
-                        "artifactLocation": {"uri": target_uri or "target://unknown"}
-                    }
-                }
-            ],
+            "locations": [{"physicalLocation": {"artifactLocation": {"uri": loc_uri}}}],
             "properties": {
                 "severity": severity,
                 "category": category,
@@ -162,6 +157,7 @@ def render_dependency_sarif(audit_result: DependencyAuditResult) -> str:
                 ),
                 "evidence": vuln.summary,
                 "remediation": fix_note,
+                "uri": vuln.source_file or audit_result.source_file,
                 "cwe": "CWE-1395",
                 "owasp": "A06:2021",
                 "nist": "SI-2",
