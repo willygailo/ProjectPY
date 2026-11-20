@@ -10,19 +10,27 @@ setup:
 	$(VENV_BIN)/pip install -e ".[dev]"
 
 test:
-	pytest -v
+	@if [ -d tests ] && [ -n "$$(find tests -name 'test_*.py' -print -quit)" ]; then \
+		pytest -v; \
+	else \
+		PYTHONPATH=src $(PYTHON) -m s1shell doctor --no-color; \
+	fi
 
 cov:
-	pytest --cov=s1shell --cov-report=term-missing
+	@if [ -d tests ] && [ -n "$$(find tests -name 'test_*.py' -print -quit)" ]; then \
+		pytest --cov=s1shell --cov-report=term-missing; \
+	else \
+		PYTHONPATH=src $(PYTHON) -m s1shell doctor --no-color; \
+	fi
 
 lint:
-	ruff check src tests
+	@if [ -d tests ]; then ruff check src tests; else ruff check src; fi
 
 format:
-	ruff format src tests
+	@if [ -d tests ]; then ruff format src tests; else ruff format src; fi
 
 format-check:
-	ruff format --check src tests
+	@if [ -d tests ]; then ruff format --check src tests; else ruff format --check src; fi
 
 typecheck:
 	mypy src

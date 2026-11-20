@@ -309,8 +309,9 @@ def parse_scope_spec(raw_spec: str, *, include_subdomains: bool = False) -> tupl
             norm_path = norm_path.rstrip("/")
         return "url_prefix", f"{scheme}://{host_fmt}{port_part}{norm_path}", include_subdomains
 
-    if text.startswith("*."):
-        host = normalize_hostname(text[2:])
+    if text.startswith("*.") or (text.startswith(".") and len(text) > 1):
+        raw_suffix = text[2:] if text.startswith("*.") else text[1:]
+        host = normalize_hostname(raw_suffix)
         if is_onion_host(host):
             if not is_v3_onion_host(host):
                 raise ValidationError(

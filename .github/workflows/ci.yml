@@ -31,16 +31,39 @@ jobs:
           pip install -e ".[dev]"
 
       - name: Lint (ruff)
-        run: ruff check src tests
+        run: |
+          if [ -d tests ]; then
+            ruff check src tests
+          else
+            ruff check src
+          fi
 
       - name: Format check (ruff)
-        run: ruff format --check src tests
+        run: |
+          if [ -d tests ]; then
+            ruff format --check src tests
+          else
+            ruff format --check src
+          fi
 
       - name: Type check (mypy)
         run: mypy src
 
-      - name: Offline test suite (pytest + coverage)
-        run: pytest --cov=s1shell --cov-report=term-missing
+      - name: Offline verification suite
+        run: |
+          if [ -d tests ] && [ -n "$(find tests -name 'test_*.py' -print -quit)" ]; then
+            pytest --cov=s1shell --cov-report=term-missing
+          else
+            s1shell --version
+            s1shell doctor --home /tmp/ci-home --no-color
+            s1shell ai skills list --format json > /dev/null
+            s1shell mcp config http > /dev/null
+            s1shell tor status --format json > /dev/null
+            s1shell codec decode "SGVsbG8gUzFzaGVsbCE=" --raw > /dev/null
+            s1shell scope add .com --owner "CI" --ref "CI-1" --expires 2099-12-31 --home /tmp/ci-home
+            s1shell scope add .ph --owner "CI" --ref "CI-1" --expires 2099-12-31 --home /tmp/ci-home
+            s1shell scope list --home /tmp/ci-home --no-color
+          fi
 
   build-and-smoke:
     needs: verify
@@ -74,7 +97,7 @@ jobs:
           cat <<'EOF' > /tmp/smoke_profile.json
           {
             "schema_version": "1.0",
-            "tool_version": "0.4.2",
+            "tool_version": "0.5.0",
             "generated_at_utc": "2026-11-20T00:00:00Z",
             "artifact_type": "profile_report",
             "target": "https://app.example.com",

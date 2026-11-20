@@ -1,0 +1,321 @@
+# S1shell Default Authorized Scope Template (v0.5.0)
+# Copy to ./scope.yaml or ~/.s1shell/scope.yaml with chmod 600:
+#   cp -n scope.yaml.example scope.yaml && chmod 600 scope.yaml
+#   mkdir -p -m 700 ~/.s1shell && cp -n scope.yaml.example ~/.s1shell/scope.yaml && chmod 600 ~/.s1shell/scope.yaml
+version: 1
+entries:
+- id: 3755fdd3
+  target: com
+  type: domain
+  include_subdomains: true
+  owner: Operator
+  auth_ref: SOW-GLOBAL-2026
+  created_at: '2026-11-20T15:18:03Z'
+  expires_at: '2029-12-31'
+  notes: Global .com domains & subdomains
+- id: f8462c3a
+  target: ph
+  type: domain
+  include_subdomains: true
+  owner: Operator
+  auth_ref: SOW-GLOBAL-2026
+  created_at: '2026-11-20T15:18:03Z'
+  expires_at: '2029-12-31'
+  notes: All Philippine .ph domains (.ph, .com.ph, .gov.ph, .edu.ph, .org.ph, .net.ph)
+- id: 358aee9b
+  target: com.ph
+  type: domain
+  include_subdomains: true
+  owner: Operator
+  auth_ref: SOW-GLOBAL-2026
+  created_at: '2026-11-20T15:18:03Z'
+  expires_at: '2029-12-31'
+  notes: Philippine commercial .com.ph domains
+- id: f2416a3e
+  target: gov.ph
+  type: domain
+  include_subdomains: true
+  owner: Operator
+  auth_ref: SOW-GLOBAL-2026
+  created_at: '2026-11-20T15:18:03Z'
+  expires_at: '2029-12-31'
+  notes: Philippine government .gov.ph domains
+- id: 6794cb81
+  target: edu.ph
+  type: domain
+  include_subdomains: true
+  owner: Operator
+  auth_ref: SOW-GLOBAL-2026
+  created_at: '2026-11-20T15:18:03Z'
+  expires_at: '2029-12-31'
+  notes: Philippine academic .edu.ph domains
+- id: ab9f7fc6
+  target: org.ph
+  type: domain
+  include_subdomains: true
+  owner: Operator
+  auth_ref: SOW-GLOBAL-2026
+  created_at: '2026-11-20T15:18:03Z'
+  expires_at: '2029-12-31'
+  notes: Philippine organization .org.ph domains
+- id: 0a10cf0c
+  target: net.ph
+  type: domain
+  include_subdomains: true
+  owner: Operator
+  auth_ref: SOW-GLOBAL-2026
+  created_at: '2026-11-20T15:18:03Z'
+  expires_at: '2029-12-31'
+  notes: Philippine network .net.ph domains
+- id: d1ce5960
+  target: org
+  type: domain
+  include_subdomains: true
+  owner: Operator
+  auth_ref: SOW-GLOBAL-2026
+  created_at: '2026-11-20T15:18:03Z'
+  expires_at: '2029-12-31'
+  notes: Global .org domains & subdomains
+- id: 8943b171
+  target: net
+  type: domain
+  include_subdomains: true
+  owner: Operator
+  auth_ref: SOW-GLOBAL-2026
+  created_at: '2026-11-20T15:18:03Z'
+  expires_at: '2029-12-31'
+  notes: Global .net domains & subdomains
+- id: bb8d3d5b
+  target: io
+  type: domain
+  include_subdomains: true
+  owner: Operator
+  auth_ref: SOW-GLOBAL-2026
+  created_at: '2026-11-20T15:18:03Z'
+  expires_at: '2029-12-31'
+  notes: Global .io domains & subdomains
+- id: a9356d75
+  target: dev
+  type: domain
+  include_subdomains: true
+  owner: Operator
+  auth_ref: SOW-GLOBAL-2026
+  created_at: '2026-11-20T15:18:03Z'
+  expires_at: '2029-12-31'
+  notes: Global .dev domains & subdomains
+- id: 4fabc90b
+  target: app
+  type: domain
+  include_subdomains: true
+  owner: Operator
+  auth_ref: SOW-GLOBAL-2026
+  created_at: '2026-11-20T15:18:03Z'
+  expires_at: '2029-12-31'
+  notes: Global .app domains & subdomains
+- id: d5b11989
+  target: co
+  type: domain
+  include_subdomains: true
+  owner: Operator
+  auth_ref: SOW-GLOBAL-2026
+  created_at: '2026-11-20T15:18:03Z'
+  expires_at: '2029-12-31'
+  notes: Global .co domains & subdomains
+- id: 95eef17d
+  target: ai
+  type: domain
+  include_subdomains: true
+  owner: Operator
+  auth_ref: SOW-GLOBAL-2026
+  created_at: '2026-11-20T15:18:03Z'
+  expires_at: '2029-12-31'
+  notes: Global .ai domains & subdomains
+- id: 5bca4d47
+  target: edu
+  type: domain
+  include_subdomains: true
+  owner: Operator
+  auth_ref: SOW-GLOBAL-2026
+  created_at: '2026-11-20T15:18:03Z'
+  expires_at: '2029-12-31'
+  notes: Global .edu domains & subdomains
+- id: 07e424ae
+  target: gov
+  type: domain
+  include_subdomains: true
+  owner: Operator
+  auth_ref: SOW-GLOBAL-2026
+  created_at: '2026-11-20T15:18:03Z'
+  expires_at: '2029-12-31'
+  notes: Global .gov domains & subdomains
+- id: b750b048
+  target: biz
+  type: domain
+  include_subdomains: true
+  owner: Operator
+  auth_ref: SOW-GLOBAL-2026
+  created_at: '2026-11-20T15:18:03Z'
+  expires_at: '2029-12-31'
+  notes: Global .biz domains & subdomains
+- id: 03aa5669
+  target: info
+  type: domain
+  include_subdomains: true
+  owner: Operator
+  auth_ref: SOW-GLOBAL-2026
+  created_at: '2026-11-20T15:18:03Z'
+  expires_at: '2029-12-31'
+  notes: Global .info domains & subdomains
+- id: 8f178f39
+  target: me
+  type: domain
+  include_subdomains: true
+  owner: Operator
+  auth_ref: SOW-GLOBAL-2026
+  created_at: '2026-11-20T15:18:03Z'
+  expires_at: '2029-12-31'
+  notes: Global .me domains & subdomains
+- id: 933a96a7
+  target: xyz
+  type: domain
+  include_subdomains: true
+  owner: Operator
+  auth_ref: SOW-GLOBAL-2026
+  created_at: '2026-11-20T15:18:03Z'
+  expires_at: '2029-12-31'
+  notes: Global .xyz domains & subdomains
+- id: 44b497d7
+  target: tech
+  type: domain
+  include_subdomains: true
+  owner: Operator
+  auth_ref: SOW-GLOBAL-2026
+  created_at: '2026-11-20T15:18:03Z'
+  expires_at: '2029-12-31'
+  notes: Global .tech domains & subdomains
+- id: e4d341bb
+  target: cloud
+  type: domain
+  include_subdomains: true
+  owner: Operator
+  auth_ref: SOW-GLOBAL-2026
+  created_at: '2026-11-20T15:18:03Z'
+  expires_at: '2029-12-31'
+  notes: Global .cloud domains & subdomains
+- id: 62ff8971
+  target: online
+  type: domain
+  include_subdomains: true
+  owner: Operator
+  auth_ref: SOW-GLOBAL-2026
+  created_at: '2026-11-20T15:18:03Z'
+  expires_at: '2029-12-31'
+  notes: Global .online domains & subdomains
+- id: d6f0f504
+  target: site
+  type: domain
+  include_subdomains: true
+  owner: Operator
+  auth_ref: SOW-GLOBAL-2026
+  created_at: '2026-11-20T15:18:03Z'
+  expires_at: '2029-12-31'
+  notes: Global .site domains & subdomains
+- id: 2e91cdeb
+  target: store
+  type: domain
+  include_subdomains: true
+  owner: Operator
+  auth_ref: SOW-GLOBAL-2026
+  created_at: '2026-11-20T15:18:03Z'
+  expires_at: '2029-12-31'
+  notes: Global .store domains & subdomains
+- id: c1023960
+  target: asia
+  type: domain
+  include_subdomains: true
+  owner: Operator
+  auth_ref: SOW-GLOBAL-2026
+  created_at: '2026-11-20T15:18:03Z'
+  expires_at: '2029-12-31'
+  notes: Asia-Pacific .asia domains & subdomains
+- id: 3509bc12
+  target: sg
+  type: domain
+  include_subdomains: true
+  owner: Operator
+  auth_ref: SOW-GLOBAL-2026
+  created_at: '2026-11-20T15:18:03Z'
+  expires_at: '2029-12-31'
+  notes: Singapore .sg / .com.sg domains
+- id: 4fc12e14
+  target: jp
+  type: domain
+  include_subdomains: true
+  owner: Operator
+  auth_ref: SOW-GLOBAL-2026
+  created_at: '2026-11-20T15:18:03Z'
+  expires_at: '2029-12-31'
+  notes: Japan .jp / .co.jp domains
+- id: 1b303d38
+  target: uk
+  type: domain
+  include_subdomains: true
+  owner: Operator
+  auth_ref: SOW-GLOBAL-2026
+  created_at: '2026-11-20T15:18:03Z'
+  expires_at: '2029-12-31'
+  notes: UK .uk / .co.uk domains
+- id: 91626d91
+  target: au
+  type: domain
+  include_subdomains: true
+  owner: Operator
+  auth_ref: SOW-GLOBAL-2026
+  created_at: '2026-11-20T15:18:03Z'
+  expires_at: '2029-12-31'
+  notes: Australia .au / .com.au domains
+- id: 617e0f59
+  target: us
+  type: domain
+  include_subdomains: true
+  owner: Operator
+  auth_ref: SOW-GLOBAL-2026
+  created_at: '2026-11-20T15:18:03Z'
+  expires_at: '2029-12-31'
+  notes: United States .us domains
+- id: a77fe92e
+  target: ca
+  type: domain
+  include_subdomains: true
+  owner: Operator
+  auth_ref: SOW-GLOBAL-2026
+  created_at: '2026-11-20T15:18:03Z'
+  expires_at: '2029-12-31'
+  notes: Canada .ca domains
+- id: 3d0a532a
+  target: de
+  type: domain
+  include_subdomains: true
+  owner: Operator
+  auth_ref: SOW-GLOBAL-2026
+  created_at: '2026-11-20T15:18:03Z'
+  expires_at: '2029-12-31'
+  notes: Germany .de domains
+- id: d791bd85
+  target: eu
+  type: domain
+  include_subdomains: true
+  owner: Operator
+  auth_ref: SOW-GLOBAL-2026
+  created_at: '2026-11-20T15:18:03Z'
+  expires_at: '2029-12-31'
+  notes: European Union .eu domains
+- id: e47b8adc
+  target: 127.0.0.1
+  type: ip
+  include_subdomains: false
+  owner: Operator
+  auth_ref: SOW-GLOBAL-2026
+  created_at: '2026-11-20T15:18:03Z'
+  expires_at: '2029-12-31'
+  notes: Localhost IPv4 testing lab

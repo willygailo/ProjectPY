@@ -7,7 +7,7 @@
 <br />
 <br />
 
-[![Version](https://img.shields.io/badge/Version-0.4.2-0ea5e9?style=for-the-badge)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/Version-0.5.0-0ea5e9?style=for-the-badge)](CHANGELOG.md)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776ab?style=for-the-badge&logo=python&logoColor=white)](pyproject.toml)
 [![Platform](https://img.shields.io/badge/Kali_Linux-Linux-557c94?style=for-the-badge&logo=kalilinux&logoColor=white)](scripts/install-kali.sh)
 [![License: MIT](https://img.shields.io/badge/License-MIT-10b981?style=for-the-badge)](LICENSE)
@@ -196,8 +196,9 @@ make check</code></pre>
 ### 1.2 Verify Your Setup
 
 ```bash
-s1shell --version         # expected: s1shell 0.4.2
-s1shell doctor            # expected: healthy=True, 81 signatures, 9 AI skills, tor_proxy status
+s1shell --version         # expected: s1shell 0.5.0
+s1shell doctor            # expected: healthy=True, 35 scope entries, 81 signatures, 9 AI skills
+s1shell scope list        # expected: 35 active TLD & localhost rules (.com, .ph, .com.ph, .gov.ph, ...)
 s1shell ai skills list    # expected: 9 bundled defensive AI skills
 s1shell tor status        # offline check for local Tor daemon & socksio readiness
 s1shell audit verify      # expected: Audit Log Integrity: VALID
@@ -516,13 +517,23 @@ s1shell intel lookup 93.184.216.34 --sources vt,greynoise,rdap
 
 ### Phase 2 — Scope Onboarding & Pre-Flight Gate
 
-Onboard your authorized SOW hosts and deny-first exclusions (`--exclude`), then confirm DNS + scope status before any packet is sent:
+> [!TIP]
+> **Pre-Configured `.com`, `.ph`, `.com.ph` & Global TLD Scope (`scope.yaml.example`):**
+> S1shell ships with [scope.yaml.example](scope.yaml.example) (and auto-discovers project `./scope.yaml` or `~/.s1shell/scope.yaml`) containing **35 pre-configured TLD rules** (`.com`, `.ph`, `.com.ph`, `.gov.ph`, `.edu.ph`, `.org.ph`, `.net.ph`, `.org`, `.net`, `.io`, `.dev`, `.app`, `.co`, `.ai`, `.edu`, `.gov`, regional TLDs, & `127.0.0.1`) while still enforcing deny-first `--exclude` rules, private/CGNAT/metadata anti-SSRF protection, `--authorized` confirmation, and SHA-256 `audit.log`:
+>
+> ```bash
+> cp -n scope.yaml.example scope.yaml && chmod 600 scope.yaml
+> mkdir -p -m 700 ~/.s1shell && cp -n scope.yaml.example ~/.s1shell/scope.yaml && chmod 600 ~/.s1shell/scope.yaml
+> ```
+
+Onboard specific authorized SOW hosts, leading-dot TLDs (`.com`, `.ph`, `.com.ph`), or deny-first exclusions (`--exclude`), then confirm DNS + scope status before any packet is sent:
 
 ```bash
-# Add authorized domain (supports domain, *.domain, IP, CIDR, or URL prefix)
+# Add specific authorized domain or leading-dot TLD (supports .com, .ph, .com.ph, *.domain, IP, CIDR, URL prefix, or v3 .onion)
 s1shell scope add target.com --include-subdomains \
   --owner "Target Corp" --ref "SOW-2026-014" --expires 2026-12-31 \
   --notes "Q4 authorized web posture assessment"
+s1shell scope add .com.ph --owner "Operator" --ref "SOW-PH-2026" --expires 2029-12-31 --replace
 
 # Explicitly exclude out-of-scope subdomains or sensitive IPs (deny-first precedence)
 s1shell scope add payments.target.com --exclude \

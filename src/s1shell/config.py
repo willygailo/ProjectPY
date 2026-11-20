@@ -198,12 +198,20 @@ class RuntimeConfig:
     ) -> RuntimeConfig:
         """Build a RuntimeConfig honoring CLI overrides and environment variables."""
         home = resolve_home_dir(home_override)
-        scope_path = (
-            Path(scope_file_override).expanduser().resolve()
-            if scope_file_override is not None
-            else home / "scope.yaml"
-        )
         env_home = os.environ.get("S1SHELL_HOME", "").strip()
+        default_scope = home / "scope.yaml"
+        project_scope = (Path.cwd() / "scope.yaml").resolve()
+        if scope_file_override is not None:
+            scope_path = Path(scope_file_override).expanduser().resolve()
+        elif (
+            home_override is None
+            and not env_home
+            and not default_scope.exists()
+            and project_scope.is_file()
+        ):
+            scope_path = project_scope
+        else:
+            scope_path = default_scope
         project_env = (
             (Path.cwd() / ".env").resolve() if (home_override is None and not env_home) else None
         )

@@ -2,7 +2,7 @@
 
 All notable changes to S1shell will be documented in this file.
 
-## [Unreleased]
+## [0.5.0] - 2026-11-20
 
 ### Added — Advanced Defensive AI Tactics, Skills Library, Pipelines & Read-Only Investigator (`s1shell ai`)
 - **Prompt-Injection Guardrails & Signal-First Distillation (`ai/guardrails.py`, `ai/distill.py`)**:
@@ -27,6 +27,9 @@ All notable changes to S1shell will be documented in this file.
   - Added fail-closed `--tor` Analyst OPSEC routing (`socks5h://127.0.0.1:9050` / `9150`) across all passive OSINT, CVE, SBOM, Threat-Intel, and Cloud AI feeds (`S1SHELL_TOR=1`), automatically bypassing Tor for local loopback Ollama/MCP endpoints and rejecting DNS-leaking `socks5://` schemes or remote proxies.
   - Added opt-in `--tor --tor-targets --authorized` zero-leak routing for authorized public target URLs/domains using a pure-Python RFC 1928 SOCKS5h tunnel (`ATYP 0x03`) for full TLS/X.509/ALPN handshakes, Tor-tunneled DNS-over-HTTPS (`TorDoHResolver`) for scope anti-SSRF validation and DNS hygiene, and `socks5h://` single-GET HTTP/well-known/`OPTIONS` fetches — enabling **Direct vs Tor perspective diffs** (`s1shell diff`) while strictly forbidding private/CGNAT targets, silent clearnet fallback, and IP rotation (`NEWNYM`).
   - Added strict RFC 7686 **Tor v3 `.onion`** scope support (`type: "onion"`, 56-char base32; rejects deprecated v2 `.onion`, zero local DNS queries), `s1shell tor status|check`, `tor_proxy` check in `s1shell doctor`, and `s1shell_tor_status` in `s1shell mcp serve` (`23` default / `26` scoped tools).
+- **Leading-Dot / Wildcard TLD Scope Rules & Project `scope.yaml` Auto-Discovery (`scope.py`, `config.py`, `scope.yaml.example`)**:
+  - Added leading-dot TLD & domain syntax (`.com`, `.ph`, `.com.ph`, `.gov.ph`, `.edu.ph`, `.org`, `.net`, `.io`, etc.) alongside `*.domain` in `s1shell scope add|import`, automatically normalizing to `include_subdomains: true`.
+  - Added automatic project `./scope.yaml` fallback discovery when `~/.s1shell/scope.yaml` is not present yet, plus a tracked `scope.yaml.example` template with 35 pre-configured Philippine (`.ph`, `.com.ph`, `.gov.ph`, `.edu.ph`, `.org.ph`, `.net.ph`), global, and regional TLD entries.
 
 ### Fixed
 - **HTTPS IP-Literal TLS Handshake (`profile/tls_check.py`)**: Fixed `ValueError: check_hostname requires server_hostname` when profiling HTTPS IP targets (e.g. `https://1.1.1.1` or `https://127.0.0.1`) by passing the IP literal as `server_hostname` during verified TLS handshakes so Python's `ssl` validates IP SANs cleanly.

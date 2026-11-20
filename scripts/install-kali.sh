@@ -46,6 +46,21 @@ echo "[*] Installing Kali system prerequisites..."
 ${SUDO} apt-get update
 ${SUDO} apt-get install -y python3 python3-venv python3-pip pipx
 
+# Seed default scope.yaml from scope.yaml.example if not present yet
+if [[ -f "${REPO_ROOT}/scope.yaml.example" ]]; then
+  if [[ ! -f "${REPO_ROOT}/scope.yaml" ]]; then
+    cp "${REPO_ROOT}/scope.yaml.example" "${REPO_ROOT}/scope.yaml"
+    chmod 600 "${REPO_ROOT}/scope.yaml"
+    echo "[+] Seeded ${REPO_ROOT}/scope.yaml (mode 0600) from scope.yaml.example"
+  fi
+  mkdir -p -m 700 "${HOME}/.s1shell"
+  if [[ ! -f "${HOME}/.s1shell/scope.yaml" ]]; then
+    cp "${REPO_ROOT}/scope.yaml.example" "${HOME}/.s1shell/scope.yaml"
+    chmod 600 "${HOME}/.s1shell/scope.yaml"
+    echo "[+] Seeded ${HOME}/.s1shell/scope.yaml (mode 0600) from scope.yaml.example"
+  fi
+fi
+
 if [[ "${DEV_MODE}" == "true" ]]; then
   echo "[*] Setting up editable development environment in ${REPO_ROOT}/.venv..."
   python3 -m venv "${REPO_ROOT}/.venv"
@@ -62,5 +77,5 @@ else
   echo "[*] Verifying S1shell installation..."
   s1shell --version
   s1shell doctor
-  echo "[+] S1shell installation complete."
+  echo "[+] S1shell installation complete. (Optional Tor support: sudo apt install -y tor && sudo systemctl enable --now tor)"
 fi

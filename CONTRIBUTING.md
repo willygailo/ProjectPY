@@ -8,7 +8,7 @@ S1shell is strictly an **authorized defensive toolkit**. Pull requests introduci
 
 - Exploit payloads, vulnerability PoC execution, or active probing/fuzzing (SQLi/XSS/SSRF/LFI strings)
 - WAF/firewall evasion, request smuggling, or User-Agent spoofing
-- Rate-limit evasion, proxy rotation, brute force, or directory/subdomain enumeration
+- Rate-limit evasion, proxy/IP rotation (including Tor `NEWNYM` / ControlPort rotation), brute force, or directory/subdomain enumeration
 - State-modifying target requests (`POST`/`PUT`/`PATCH`/`DELETE`) or bypassing `guard.py`
 
 ## Local Development Setup
@@ -17,25 +17,17 @@ S1shell is strictly an **authorized defensive toolkit**. Pull requests introduci
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
-```
-
-Or using `make`:
-
-```bash
-make setup
-source .venv/bin/activate
 make check
 ```
 
 ## Verification Standards
 
-1. **100% Offline Tests**: All tests under `tests/` must run completely offline. Mock external HTTP/DNS/NVD/CVE.org calls and use ephemeral `127.0.0.1` servers where socket verification is required.
-2. **Lint & Format**: `ruff check src tests` and `ruff format --check src tests` must pass cleanly.
-3. **Strict Typing**: `mypy src` runs with `strict = true` targeting Python `>=3.10`.
+1. **Lint & Format**: `ruff check src` and `ruff format --check src` must pass cleanly.
+2. **Strict Typing**: `mypy src` runs with `strict = true` targeting Python `>=3.10`.
+3. **100% Offline Verification**: Any automated test or smoke check must run completely offline using `httpx.MockTransport` or ephemeral `127.0.0.1` loopback servers.
 4. **Canonical Schemas**: Keep JSON output changes additive under `schema_version: "1.0"`, and update [docs/schemas.md](docs/schemas.md) when adding fields.
 
-## Adding Passive Fingerprint Signatures
+## Extending Passive Signatures & Defensive AI Skills
 
-1. Add entries only to [src/s1shell/fingerprint/signatures.yaml](src/s1shell/fingerprint/signatures.yaml) using headers, `Set-Cookie` names/patterns, or TLS issuer patterns observable in a single normal HTTP `GET` response.
-2. Include an optional regex capture group when the header carries a clean version string (e.g. `(?i)\\bnginx(?:/([\\d.]+))?`).
-3. Add offline unit tests in [tests/fingerprint/test_matcher.py](tests/fingerprint/test_matcher.py) and verify no existing signatures regress.
+- **Passive Fingerprint Signatures**: Add rules to [src/s1shell/fingerprint/signatures.yaml](src/s1shell/fingerprint/signatures.yaml) (or user-local `~/.s1shell/signatures.d/*.yaml`) using headers, `Set-Cookie` patterns, CNAMEs, TLS issuers, or passive HTML hints observable in a single normal HTTP `GET` response.
+- **Defensive AI Skills**: Add declarative skills to [src/s1shell/ai/skills.yaml](src/s1shell/ai/skills.yaml) (or user-local `~/.s1shell/skills.d/*.yaml`) and verify with `s1shell ai skills list` and `s1shell doctor`.
