@@ -132,8 +132,25 @@ s1shell completion fish > ~/.config/fish/completions/s1shell.fish
 
 All API keys are **optional** — S1shell works out of the box with unauthenticated NVD, CVE.org, OSV.dev, `crt.sh`, and RDAP. When configured, keys are written atomically with `0600` permissions (gitignored and always masked in output) and resolve in order: **process environment > project `./.env` > `~/.s1shell/.env`** (see [.env.example](.env.example)).
 
+#### Step 1 — Get Your API Keys / Tokens (Log In or Sign Up)
+
+| Service | CLI Flag / Env Variable | Where to Log In & Get Key | Purpose |
+|---|---|---|---|
+| **NVD (NIST)** | `--set-nvd-key` / `NVD_API_KEY` | [Request NVD API Key](https://nvd.nist.gov/developers/request-an-api-key) | Raises NVD 2.0 quota from 5 req/30s to 50 req/30s |
+| **GitHub (GHSA)** | `--set-github-key` / `GITHUB_TOKEN` | [GitHub Personal Access Tokens](https://github.com/settings/tokens) | Authenticates GitHub Security Advisories & CVE enrichment |
+| **VirusTotal v3** | `--set-vt-key` / `VIRUSTOTAL_API_KEY` | [Sign Up](https://www.virustotal.com/gui/join-us) · [My API Key](https://www.virustotal.com/gui/my-apikey) | Passive domain/IP reputation lookups |
+| **GreyNoise Community** | `--set-greynoise-key` / `GREYNOISE_API_KEY` | [Sign Up](https://viz.greynoise.io/signup) · [Account API Key](https://viz.greynoise.io/account/api-key) | Passive IP scanner noise & benign RIOT lookup |
+| **urlscan.io** | `--set-urlscan-key` / `URLSCAN_API_KEY` | [Sign Up](https://urlscan.io/signup) · [Settings & API](https://urlscan.io/user/#settings) | Strictly passive historical Search API index lookup |
+| **Ollama (Local AI)** | `--provider ollama` | [Download Ollama](https://ollama.com/download) *(no account / no key needed)* | Air-gapped local LLM triage with zero cloud telemetry |
+| **Anthropic Claude** | `--provider anthropic` / `ANTHROPIC_API_KEY` | [Anthropic Console Keys](https://console.anthropic.com/settings/keys) *(use `sk-ant-api*`, not `sk-ant-admin*`)* | Cloud defensive AI triage & remediation |
+| **OpenAI-Compatible** | `--provider openai_compat` / `OPENAI_API_KEY` | [OpenAI API Keys](https://platform.openai.com/api-keys) | OpenAI, OpenRouter, LiteLLM, or vLLM inference |
+| **Google Gemini** | `--provider gemini` / `GEMINI_API_KEY` | [Google AI Studio API Keys](https://aistudio.google.com/apikey) | Google Gemini defensive AI inference |
+| **State Directory** | `S1SHELL_HOME` | Local path override *(default `~/.s1shell`)* | Stores `scope.yaml`, `audit.log`, `cache.db`, & `.env` |
+
+#### Step 2 — Save Your Keys via CLI (`0600`)
+
 ```bash
-# Save passive threat-intelligence & CVE quota keys
+# Save passive threat-intelligence & CVE quota keys (pass only the keys you have)
 s1shell intel env \
   --set-nvd-key "YOUR_NVD_KEY" \
   --set-github-key "YOUR_GITHUB_TOKEN" \
@@ -144,22 +161,14 @@ s1shell intel env \
 # Inspect masked threat-intel key status
 s1shell intel env
 
-# Configure local air-gapped Ollama (zero cloud telemetry) — or anthropic / openai_compat / gemini
+# Configure local air-gapped Ollama (zero cloud telemetry):
 s1shell ai env --provider ollama --model "llama3.1:8b"
-# Example cloud provider:
-# s1shell ai env --provider anthropic --set-key "sk-ant-api03-..." --model "claude-sonnet-4-20250514"
-```
 
-| Environment Variable | Module | Purpose |
-|---|---|---|
-| `NVD_API_KEY` | `cve`, `assess` | Raises NVD 2.0 quota from 5 req/30s to 50 req/30s |
-| `GITHUB_TOKEN` | `intel`, `cve` | Authenticates GitHub Security Advisories (GHSA) lookups & CVE enrichment |
-| `VIRUSTOTAL_API_KEY` | `intel`, `assess --intel` | Passive VirusTotal v3 domain/IP reputation |
-| `GREYNOISE_API_KEY` | `intel`, `assess --intel` | Passive GreyNoise Community IP scanner & benign RIOT lookup |
-| `URLSCAN_API_KEY` | `intel`, `assess --intel` | Passive urlscan.io historical Search API index lookup |
-| `S1SHELL_AI_PROVIDER` | `ai`, `assess --ai` | `anthropic` (default), `ollama`, `openai_compat`, or `gemini` |
-| `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GEMINI_API_KEY` | `ai` | Cloud LLM inference credentials (not needed for local `ollama`) |
-| `S1SHELL_HOME` | All | Override state directory (default `~/.s1shell`) |
+# Or configure a cloud AI provider (Anthropic / OpenAI-compatible / Gemini):
+# s1shell ai env --provider anthropic --set-key "sk-ant-api03-..." --model "claude-sonnet-4-20250514"
+# s1shell ai env --provider openai_compat --set-key "sk-..." --model "gpt-4o-mini"
+# s1shell ai env --provider gemini --set-key "AIza..." --model "gemini-2.5-flash"
+```
 
 ### 1.4 Verify Your Setup
 
