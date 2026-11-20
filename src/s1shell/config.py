@@ -28,6 +28,10 @@ DEFAULT_CISA_KEV_URL = (
 )
 DEFAULT_EPSS_API_URL = "https://api.first.org/data/v1/epss"
 DEFAULT_OSV_API_URL = "https://api.osv.dev/v1/querybatch"
+DEFAULT_GITHUB_ADVISORIES_URL = "https://api.github.com/advisories"
+DEFAULT_VIRUSTOTAL_API_URL = "https://www.virustotal.com/api/v3"
+DEFAULT_GREYNOISE_API_URL = "https://api.greynoise.io/v3/community"
+DEFAULT_URLSCAN_API_URL = "https://urlscan.io/api/v1/search/"
 SUPPORTED_AI_PROVIDERS = ("anthropic", "ollama", "openai_compat", "gemini")
 
 
@@ -132,6 +136,10 @@ class RuntimeConfig:
     cisa_kev_url: str = DEFAULT_CISA_KEV_URL
     epss_api_url: str = DEFAULT_EPSS_API_URL
     osv_api_url: str = DEFAULT_OSV_API_URL
+    github_advisories_url: str = DEFAULT_GITHUB_ADVISORIES_URL
+    virustotal_api_url: str = DEFAULT_VIRUSTOTAL_API_URL
+    greynoise_api_url: str = DEFAULT_GREYNOISE_API_URL
+    urlscan_api_url: str = DEFAULT_URLSCAN_API_URL
 
     @classmethod
     def from_env(
@@ -178,6 +186,22 @@ class RuntimeConfig:
     def get_nvd_api_key(self) -> tuple[str | None, str]:
         """Resolve `NVD_API_KEY` across process env and `.env` files."""
         return self.get_env_var("NVD_API_KEY")
+
+    def get_github_token(self) -> tuple[str | None, str]:
+        """Resolve `GITHUB_TOKEN` across process env and `.env` files."""
+        return self.get_env_var("GITHUB_TOKEN")
+
+    def get_virustotal_api_key(self) -> tuple[str | None, str]:
+        """Resolve `VIRUSTOTAL_API_KEY` across process env and `.env` files."""
+        return self.get_env_var("VIRUSTOTAL_API_KEY")
+
+    def get_greynoise_api_key(self) -> tuple[str | None, str]:
+        """Resolve `GREYNOISE_API_KEY` across process env and `.env` files."""
+        return self.get_env_var("GREYNOISE_API_KEY")
+
+    def get_urlscan_api_key(self) -> tuple[str | None, str]:
+        """Resolve `URLSCAN_API_KEY` across process env and `.env` files."""
+        return self.get_env_var("URLSCAN_API_KEY")
 
     def get_anthropic_api_key(self) -> tuple[str | None, str]:
         """Resolve `ANTHROPIC_API_KEY` and return `(value, source)`."""

@@ -69,6 +69,9 @@ class CVERecord:
     epss_score: float | None = None
     epss_percentile: float | None = None
     version_verified: bool | None = None
+    ghsa_id: str | None = None
+    ghsa_url: str | None = None
+    patched_versions: list[str] = field(default_factory=list)
     priority: str = ""
 
     def __post_init__(self) -> None:

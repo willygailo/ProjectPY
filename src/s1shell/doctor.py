@@ -182,12 +182,46 @@ def run_doctor(cfg: RuntimeConfig) -> DoctorReport:
             name="nvd_api_key",
             status="ok",
             detail=(
-                f"NVD_API_KEY set via {nvd_src} (50 req/30s quota)"
-                if has_nvd_key
+                f"NVD_API_KEY set ({mask_api_key(nvd_key)} via {nvd_src}; 50 req/30s quota)"
+                if (has_nvd_key and nvd_key is not None)
                 else "NVD_API_KEY not set (using unauthenticated 5 req/30s quota)"
             ),
         )
     )
+
+    intel_feeds = [
+        ("github_token", "GITHUB_TOKEN", cfg.get_github_token(), "GHSA advisory enrichment"),
+        (
+            "virustotal_api_key",
+            "VIRUSTOTAL_API_KEY",
+            cfg.get_virustotal_api_key(),
+            "VirusTotal passive domain/IP reputation",
+        ),
+        (
+            "greynoise_api_key",
+            "GREYNOISE_API_KEY",
+            cfg.get_greynoise_api_key(),
+            "GreyNoise IP noise & RIOT classification",
+        ),
+        (
+            "urlscan_api_key",
+            "URLSCAN_API_KEY",
+            cfg.get_urlscan_api_key(),
+            "urlscan.io passive historical search",
+        ),
+    ]
+    for chk_name, env_name, (val, src), desc in intel_feeds:
+        checks.append(
+            DoctorCheck(
+                name=chk_name,
+                status="ok",
+                detail=(
+                    f"{env_name} set ({mask_api_key(val)} via {src}; {desc})"
+                    if val
+                    else f"{env_name} not set (optional; enables {desc})"
+                ),
+            )
+        )
 
     ant_key, ant_source = cfg.get_anthropic_api_key()
     key_type = classify_anthropic_key(ant_key)

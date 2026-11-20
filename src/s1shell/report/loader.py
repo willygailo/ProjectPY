@@ -43,6 +43,8 @@ def _validate_artifact_structure(data: dict[str, Any], path: Path) -> None:
             )
     elif atype == "cve_report" and not isinstance(data.get("records"), list):
         raise ValidationError(f"CVE artifact '{path}' is missing required 'records' list.")
+    elif atype == "intel_report" and not isinstance(data.get("indicator"), str):
+        raise ValidationError(f"Intel artifact '{path}' is missing required 'indicator'.")
     elif atype == "assess_report" and (
         not isinstance(data.get("profile"), dict) or not isinstance(data.get("posture"), dict)
     ):
@@ -64,6 +66,7 @@ def load_artifacts(
     profiles: list[dict[str, Any]] = []
     fingerprints: list[dict[str, Any]] = []
     cves: list[dict[str, Any]] = []
+    intel_list: list[dict[str, Any]] = []
     posture: dict[str, Any] | None = None
     findings: list[dict[str, Any]] = []
     ai_analysis: dict[str, Any] | None = None
@@ -79,6 +82,8 @@ def load_artifacts(
             fingerprints.append(data)
         elif atype == "cve_report":
             cves.append(data)
+        elif atype == "intel_report":
+            intel_list.append(data)
         elif atype == "assess_report":
             if isinstance(data.get("profile"), dict):
                 profiles.append(data["profile"])
@@ -86,6 +91,8 @@ def load_artifacts(
                 fingerprints.append(data["fingerprint"])
             if isinstance(data.get("cve"), dict):
                 cves.append(data["cve"])
+            if isinstance(data.get("intel"), dict):
+                intel_list.append(data["intel"])
             if isinstance(data.get("posture"), dict):
                 posture = data["posture"]
             if isinstance(data.get("findings"), list):
@@ -120,7 +127,7 @@ def load_artifacts(
         _validate_artifact_structure(data, path)
         cves.append(data)
 
-    if not (profiles or fingerprints or cves):
+    if not (profiles or fingerprints or cves or intel_list):
         raise ValidationError(
             "Provide at least one artifact (--input, --profile, --fingerprint, or --cve)."
         )
@@ -157,6 +164,7 @@ def load_artifacts(
         profiles=profiles,
         fingerprints=fingerprints,
         cves=cves,
+        intel=intel_list,
         posture=posture,
         findings=findings,
         ai_analysis=ai_analysis,

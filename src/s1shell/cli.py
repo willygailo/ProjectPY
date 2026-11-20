@@ -24,6 +24,7 @@ from s1shell.cve.service import CVEService
 from s1shell.doctor import run_doctor
 from s1shell.errors import ExitCode, PolicyGateError, S1ShellError, ValidationError
 from s1shell.fingerprint.service import FingerprintService
+from s1shell.intel.service import SUPPORTED_INTEL_SOURCES, IntelService
 from s1shell.mcp_server import S1ShellMCPServer
 from s1shell.models import utc_now
 from s1shell.output import (
@@ -39,6 +40,9 @@ from s1shell.output import (
     render_dependency_audit,
     render_doctor_report,
     render_fingerprint_result,
+    render_ghsa_advisories,
+    render_intel_env,
+    render_intel_lookup,
     render_profile_result,
     render_remediation_plan,
     render_scope_check,
@@ -515,6 +519,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Enrich correlated CVEs with CISA KEV & FIRST EPSS risk intelligence.",
     )
     assess_p.add_argument(
+        "--intel",
+        action="store_true",
+        help="Run passive third-party threat intel (VirusTotal, GreyNoise, urlscan.io).",
+    )
+    assess_p.add_argument(
         "--min-cvss",
         type=float,
         default=7.0,
@@ -605,6 +614,66 @@ def build_parser() -> argparse.ArgumentParser:
         help="Target stack template (auto, nginx, apache, caddy, express, generic).",
     )
 
+    # --- intel ---
+    intel_p = modules.add_parser(
+        "intel",
+        parents=[common],
+        help="Passive threat intelligence (VirusTotal, GreyNoise, urlscan.io, GitHub GHSA).",
+    )
+    intel_cmds = intel_p.add_subparsers(dest="command", required=True)
+
+    i_env = intel_cmds.add_parser(
+        "env",
+        parents=[common],
+        help="Show masked status or save NVD/GitHub/VT/GreyNoise/urlscan API keys to `.env`.",
+    )
+    i_env.add_argument("--set-nvd-key", default=None, help="Save NVD_API_KEY.")
+    i_env.add_argument("--set-github-key", default=None, help="Save GITHUB_TOKEN.")
+    i_env.add_argument("--set-vt-key", default=None, help="Save VIRUSTOTAL_API_KEY.")
+    i_env.add_argument("--set-greynoise-key", default=None, help="Save GREYNOISE_API_KEY.")
+    i_env.add_argument("--set-urlscan-key", default=None, help="Save URLSCAN_API_KEY.")
+    i_env.add_argument(
+        "--env-file",
+        type=Path,
+        default=None,
+        help="Target `.env` file path when saving keys (default: <home>/.env).",
+    )
+
+    i_look = intel_cmds.add_parser(
+        "lookup",
+        parents=[common],
+        help="Query passive VirusTotal, GreyNoise, and urlscan.io feeds (zero target contact).",
+    )
+    i_look.add_argument("indicator", help="Domain, URL, or IP address to look up passively.")
+    i_look.add_argument(
+        "--pinned-ip",
+        default=None,
+        help="Optional IPv4 address for GreyNoise lookup alongside a domain.",
+    )
+    i_look.add_argument(
+        "--sources",
+        default=None,
+        help=f"Comma-separated feeds ({','.join(SUPPORTED_INTEL_SOURCES)}). Default: all.",
+    )
+    i_look.add_argument("--refresh", action="store_true", help="Bypass local cache.")
+    i_look.add_argument("--offline", action="store_true", help="Read from local cache only.")
+
+    i_adv = intel_cmds.add_parser(
+        "advisory",
+        parents=[common],
+        help="Query GitHub Security Advisories (GHSA) by CVE ID or ecosystem+package.",
+    )
+    i_adv.add_argument("--cve", dest="cve_id", default=None, help="CVE ID (e.g. CVE-2023-45803).")
+    i_adv.add_argument(
+        "--ecosystem",
+        default=None,
+        help="Package ecosystem (pip, npm, go, rust, maven, nuget, composer, rubygems).",
+    )
+    i_adv.add_argument("--package", default=None, help="Package name (e.g. requests).")
+    i_adv.add_argument("--limit", type=int, default=15, help="Max advisories to return.")
+    i_adv.add_argument("--refresh", action="store_true", help="Bypass local cache.")
+    i_adv.add_argument("--offline", action="store_true", help="Read from local cache only.")
+
     # --- mcp ---
     mcp_p = modules.add_parser(
         "mcp",
@@ -631,6 +700,7 @@ def dispatch(
     scope_manager: ScopeManager | None = None,
     cve_service: CVEService | None = None,
     dep_audit_service: DependencyAuditService | None = None,
+    intel_service: IntelService | None = None,
     profile_service: ProfileService | None = None,
     fingerprint_service: FingerprintService | None = None,
     report_service: ReportService | None = None,
@@ -966,6 +1036,7 @@ def dispatch(
                 check_methods=bool(args.check_methods),
                 skip_cve=bool(args.skip_cve),
                 enrich_cve=bool(args.enrich_cve),
+                run_intel=bool(args.intel),
                 min_cvss=args.min_cvss,
                 cve_limit=args.cve_limit,
                 offline_cve=bool(args.offline),
@@ -1021,6 +1092,7 @@ def dispatch(
             check_methods=bool(args.check_methods),
             skip_cve=bool(args.skip_cve),
             enrich_cve=bool(args.enrich_cve),
+            run_intel=bool(args.intel),
             min_cvss=args.min_cvss,
             cve_limit=args.cve_limit,
             offline_cve=bool(args.offline),
@@ -1070,11 +1142,69 @@ def dispatch(
         render_remediation_plan(plan, fmt=fmt, console=console, out_file=out_file, stdout=stdout)
         return int(ExitCode.SUCCESS)
 
+    if args.module == "intel":
+        fmt = str(_opt(args, "fmt", "table"))
+        i_svc = (
+            intel_service
+            if intel_service is not None
+            else IntelService(cfg, audit_logger=audit_log)
+        )
+        if args.command == "env":
+            if any(
+                val is not None
+                for val in (
+                    args.set_nvd_key,
+                    args.set_github_key,
+                    args.set_vt_key,
+                    args.set_greynoise_key,
+                    args.set_urlscan_key,
+                )
+            ):
+                i_env_res = i_svc.save_env(
+                    nvd_key=args.set_nvd_key,
+                    github_token=args.set_github_key,
+                    vt_key=args.set_vt_key,
+                    greynoise_key=args.set_greynoise_key,
+                    urlscan_key=args.set_urlscan_key,
+                    env_file=args.env_file,
+                )
+            else:
+                i_env_res = i_svc.env_status()
+            render_intel_env(i_env_res, fmt=fmt, console=console, out_file=out_file, stdout=stdout)
+            return int(ExitCode.SUCCESS)
+        if args.command == "lookup":
+            src_list = [s.strip() for s in args.sources.split(",")] if args.sources else None
+            look_res = i_svc.lookup(
+                args.indicator,
+                pinned_ip=args.pinned_ip,
+                sources=src_list,
+                offline=bool(args.offline),
+                refresh=bool(args.refresh),
+            )
+            render_intel_lookup(
+                look_res, fmt=fmt, console=console, out_file=out_file, stdout=stdout
+            )
+            return int(ExitCode.SUCCESS)
+        if args.command == "advisory":
+            adv_res = i_svc.advisories(
+                cve_id=args.cve_id,
+                ecosystem=args.ecosystem,
+                package=args.package,
+                limit=args.limit,
+                offline=bool(args.offline),
+                refresh=bool(args.refresh),
+            )
+            render_ghsa_advisories(
+                adv_res, fmt=fmt, console=console, out_file=out_file, stdout=stdout
+            )
+            return int(ExitCode.SUCCESS)
+
     if args.module == "mcp" and args.command == "serve":
         mcp_srv = S1ShellMCPServer(
             cfg,
             cve_service=cve_service,
             dep_audit_service=dep_audit_service,
+            intel_service=intel_service,
             fingerprint_service=fingerprint_service,
             scope_manager=scope_mgr,
             audit_logger=audit_log,

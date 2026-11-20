@@ -2,6 +2,17 @@
 
 All notable changes to S1shell will be documented in this file.
 
+## [0.3.0] - 2026-11-20
+
+### Added — Passive Multi-Feed Threat Intelligence (`s1shell intel`)
+- **New `s1shell intel` Module (Zero Target Contact)**:
+  - `s1shell intel env`: Inspect masked status and securely persist `NVD_API_KEY`, `GITHUB_TOKEN`, `VIRUSTOTAL_API_KEY`, `GREYNOISE_API_KEY`, and `URLSCAN_API_KEY` into a `0600` `.env` file.
+  - `s1shell intel lookup <domain-or-ip>`: Passive domain/IP reputation via **VirusTotal v3**, IP scanner/benign RIOT context via **GreyNoise Community**, and strictly passive historical footprint via **urlscan.io Search API** — cached in SQLite (`--offline` supported) with graceful degradation.
+  - `s1shell intel advisory`: Query the **GitHub Security Advisories (GHSA)** REST API by CVE ID or ecosystem+package.
+- **GHSA Enrichment on `cve get --enrich`**: Automatically attaches matching GHSA IDs, advisory URLs, and first-patched versions when `GITHUB_TOKEN` is configured.
+- **Assessment Threat Intel Correlation (`s1shell assess --intel`)**: Enriches scoped assessments with VirusTotal, GreyNoise, and urlscan.io passive telemetry, adds `INTEL-VT-MAL`, `INTEL-GN-MAL`, and `INTEL-GN-RIOT` findings to posture scoring, saves `intel.json`, and renders a dedicated autoescaped **Passive Threat Intelligence** card in HTML and Markdown reports.
+- **Diagnostics, Reports & MCP**: Updated `s1shell doctor` to report masked status for all 5 intel feeds, added `intel_report` support in `s1shell report build`, and exposed `s1shell_intel_lookup` and `s1shell_intel_advisory` in `s1shell mcp serve`.
+
 ## [0.2.0] - 2026-11-20
 
 ### Added — Advanced Pentester & AppSec Suite

@@ -8,6 +8,7 @@ from s1shell import __version__
 from s1shell.ai.models import AIAnalysisResult
 from s1shell.cve.models import CVESearchResult
 from s1shell.fingerprint.models import FingerprintResult
+from s1shell.intel.models import IntelLookupResult
 from s1shell.models import SCHEMA_VERSION, utc_now_iso
 from s1shell.profile.models import ProfileResult
 
@@ -78,6 +79,7 @@ class AssessmentResult:
     profile: ProfileResult
     fingerprint: FingerprintResult
     cve: CVESearchResult | None = None
+    intel: IntelLookupResult | None = None
     ai_analysis: AIAnalysisResult | None = None
     preset: str = "web"
     suppressed_findings: list[AssessmentFinding] = field(default_factory=list)

@@ -8,6 +8,7 @@ from s1shell.assess.models import AssessmentFinding, PostureScore
 from s1shell.cve.models import CVESearchResult
 from s1shell.errors import ValidationError
 from s1shell.fingerprint.models import FingerprintResult
+from s1shell.intel.models import IntelLookupResult
 from s1shell.profile.models import ProfileResult
 
 SUPPORTED_PRESETS = ("web", "api", "strict")
@@ -42,6 +43,7 @@ _DOMAIN_MAP = {
     "well_known": "client_html",
     "disclosure": "disclosure",
     "cve": "cve_exposure",
+    "intel": "threat_intel",
 }
 
 _DOMAIN_PENALTY_CAPS = {
@@ -52,6 +54,7 @@ _DOMAIN_PENALTY_CAPS = {
     "client_html": 15,
     "disclosure": 8,
     "cve_exposure": 35,
+    "threat_intel": 20,
 }
 
 _DEPRECATED_TLS = {"TLSv1", "TLSv1.0", "TLSv1.1"}
@@ -94,6 +97,7 @@ _COMPLIANCE_BY_CATEGORY: dict[str, tuple[str, str]] = {
     "html": ("A05:2021", "SI-10"),
     "well_known": ("A05:2021", "CM-6"),
     "cve": ("A06:2021", "SI-2"),
+    "intel": ("A05:2021", "SI-4"),
 }
 
 # (id, severity, remediation, cwe, asvs)
@@ -255,6 +259,7 @@ def evaluate_posture_with_suppressions(
     fingerprint: FingerprintResult,
     cve: CVESearchResult | None = None,
     *,
+    intel: IntelLookupResult | None = None,
     preset: str = "web",
     ignore_findings: set[str] | None = None,
 ) -> tuple[PostureScore, list[AssessmentFinding], list[AssessmentFinding]]:
@@ -1195,6 +1200,64 @@ def evaluate_posture_with_suppressions(
                 )
             )
 
+    # 11. Passive Threat Intelligence (VirusTotal & GreyNoise)
+    if intel is not None:
+        vt = intel.virustotal
+        if vt is not None and (vt.malicious > 0 or vt.suspicious > 0):
+            vt_sev = "HIGH" if vt.malicious >= 3 else "MEDIUM"
+            raw_findings.append(
+                AssessmentFinding(
+                    id="INTEL-VT-MAL",
+                    severity=vt_sev,
+                    category="intel",
+                    title="VirusTotal security vendors flagged target reputation",
+                    evidence=(
+                        f"malicious={vt.malicious}, suspicious={vt.suspicious}, "
+                        f"harmless={vt.harmless} ({vt.gui_url})"
+                    ),
+                    remediation=(
+                        "Investigate potential compromise, phishing abuse, or shared-IP "
+                        "reputation issues and request vendor re-analysis after cleanup."
+                    ),
+                    cwe="CWE-1188",
+                    asvs="V14.1.1",
+                )
+            )
+        gn = intel.greynoise
+        if gn is not None:
+            if gn.classification == "malicious":
+                raw_findings.append(
+                    AssessmentFinding(
+                        id="INTEL-GN-MAL",
+                        severity="MEDIUM",
+                        category="intel",
+                        title="GreyNoise classifies target pinned IP as malicious scanner",
+                        evidence=f"IP={gn.ip}, noise={gn.noise}, last_seen={gn.last_seen or 'n/a'}",
+                        remediation=(
+                            "Audit outbound traffic on this host for unauthorized scanning "
+                            "or shared hosting neighbors."
+                        ),
+                        cwe="CWE-1188",
+                        asvs="V14.1.1",
+                    )
+                )
+            elif gn.riot:
+                raw_findings.append(
+                    AssessmentFinding(
+                        id="INTEL-GN-RIOT",
+                        severity="INFO",
+                        category="intel",
+                        title="Pinned IP matches GreyNoise RIOT benign infrastructure",
+                        evidence=f"IP={gn.ip}, provider={gn.name or 'known benign service'}",
+                        remediation=(
+                            "No action required; confirms target sits behind known shared "
+                            "CDN/cloud infrastructure."
+                        ),
+                        cwe="CWE-200",
+                        asvs="V14.1.1",
+                    )
+                )
+
     # Enrich with OWASP/NIST compliance tags and apply preset / suppression waivers.
     ignore_upper = {fid.strip().upper() for fid in (ignore_findings or set()) if fid.strip()}
     findings: list[AssessmentFinding] = []
@@ -1253,6 +1316,7 @@ def evaluate_posture(
     fingerprint: FingerprintResult,
     cve: CVESearchResult | None = None,
     *,
+    intel: IntelLookupResult | None = None,
     preset: str = "web",
     ignore_findings: set[str] | None = None,
 ) -> tuple[PostureScore, list[AssessmentFinding]]:
@@ -1261,6 +1325,7 @@ def evaluate_posture(
         profile,
         fingerprint,
         cve,
+        intel=intel,
         preset=preset,
         ignore_findings=ignore_findings,
     )

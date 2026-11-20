@@ -139,6 +139,22 @@ _No passive technology signatures matched._
 {% endfor %}
 {% endif %}
 
+{% if bundle.intel %}
+## Passive Threat Intelligence
+{% for it in bundle.intel %}
+### {{ it.indicator }} (`{{ it.indicator_type }}`)
+{% if it.get("virustotal") -%}
+- **VirusTotal:** malicious={{ it.virustotal.malicious }}, suspicious={{ it.virustotal.suspicious }}, harmless={{ it.virustotal.harmless }}, reputation={{ it.virustotal.reputation }}{% if it.virustotal.get("as_owner") %} (`{{ it.virustotal.as_owner }}`){% endif %}
+{% endif -%}
+{% if it.get("greynoise") -%}
+- **GreyNoise:** classification=`{{ it.greynoise.classification }}`, noise={{ it.greynoise.noise }}, riot={{ it.greynoise.riot }}{% if it.greynoise.get("name") %} (`{{ it.greynoise.name }}`){% endif %}
+{% endif -%}
+{% if it.get("urlscan") -%}
+- **urlscan.io (Passive):** total_results={{ it.urlscan.total_results }}{% if it.urlscan.get("observed_servers") %}, servers=`{{ it.urlscan.observed_servers | join(", ") }}`{% endif %}
+{% endif %}
+{% endfor %}
+{% endif %}
+
 {% if bundle.cves %}
 ## CVE Triage Findings
 {% for cve_bundle in bundle.cves %}

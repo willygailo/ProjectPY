@@ -5,7 +5,8 @@ from __future__ import annotations
 from s1shell.errors import ValidationError
 
 _MODULES = (
-    "scope cve profile fingerprint report audit doctor completion ai assess diff remediate mcp"
+    "scope cve intel profile fingerprint report audit doctor completion ai assess diff "
+    "remediate mcp"
 )
 _COMMON_FLAGS = "--format --out --verbose --no-color --authorized --scope-file --home --help"
 _OUTCOMES = "success blocked_out_of_scope blocked_unauthorized error"
@@ -27,9 +28,14 @@ _AI_FLAGS = (
 )
 _ASSESS_FLAGS = (
     "--targets-file --delay --no-tls-versions --no-dns-security --well-known "
-    "--check-methods --preset --ignore-finding --no-remediate "
+    "--check-methods --preset --ignore-finding --no-remediate --intel "
     "--skip-cve --enrich-cve --min-cvss --cve-limit --offline --ai --ai-provider "
     f"--ai-mode --redact --fail-on --min-score --operator --out-dir {_COMMON_FLAGS}"
+)
+_INTEL_FLAGS = (
+    "--set-nvd-key --set-github-key --set-vt-key --set-greynoise-key --set-urlscan-key "
+    "--env-file --pinned-ip --sources --cve --ecosystem --package --limit --refresh "
+    f"--offline {_COMMON_FLAGS}"
 )
 _REMEDIATE_FLAGS = f"--stack {_COMMON_FLAGS}"
 _FILE_FLAGS = (
@@ -142,6 +148,13 @@ _s1shell_completions() {{
         remediate)
             COMPREPLY=( $(compgen -W "{_REMEDIATE_FLAGS}" -- "${{cur}}") )
             ;;
+        intel)
+            if [[ ${{COMP_CWORD}} -eq 2 ]]; then
+                COMPREPLY=( $(compgen -W "env lookup advisory" -- "${{cur}}") )
+            else
+                COMPREPLY=( $(compgen -W "{_INTEL_FLAGS}" -- "${{cur}}") )
+            fi
+            ;;
         mcp)
             if [[ ${{COMP_CWORD}} -eq 2 ]]; then
                 COMPREPLY=( $(compgen -W "serve" -- "${{cur}}") )
@@ -165,6 +178,7 @@ _s1shell() {
     modules=(
         'scope:Manage authorized target scope, exclusions, and bulk imports'
         'cve:Research CVEs via NVD, CVE.org, OSV.dev, CISA KEV, and FIRST EPSS'
+        'intel:Passive threat intel (VirusTotal, GreyNoise, urlscan.io, GitHub GHSA)'
         'profile:Read-only DNS/TLS/HTTP/HTML profiling'
         'fingerprint:Passive software, CDN, WAF, and JS library identification'
         'report:Compile CVE, profile, fingerprint, and assess reports'
@@ -247,6 +261,15 @@ _s1shell() {
                     subcmds=('serve:Start read-only offline MCP server')
                     _describe 'mcp command' subcmds
                     ;;
+                intel)
+                    local -a subcmds
+                    subcmds=(
+                        'env:Show or update intel API keys in .env'
+                        'lookup:Passive VT/GreyNoise/urlscan lookup'
+                        'advisory:Query GitHub Security Advisories (GHSA)'
+                    )
+                    _describe 'intel command' subcmds
+                    ;;
             esac
             ;;
     esac
@@ -259,6 +282,7 @@ _FISH_COMPLETION = """# fish completion for s1shell
 complete -c s1shell -f
 complete -c s1shell -n "__fish_use_subcommand" -a "scope" -d "Manage authorized target scope"
 complete -c s1shell -n "__fish_use_subcommand" -a "cve" -d "CVE & SBOM intelligence (NVD/OSV)"
+complete -c s1shell -n "__fish_use_subcommand" -a "intel" -d "Passive VT/GreyNoise/urlscan/GHSA"
 complete -c s1shell -n "__fish_use_subcommand" -a "profile" -d "Read-only target profiling"
 complete -c s1shell -n "__fish_use_subcommand" -a "fingerprint" -d "Passive stack matching"
 complete -c s1shell -n "__fish_use_subcommand" -a "report" -d "Compile assessment reports"
@@ -278,6 +302,7 @@ complete -c s1shell -n "__fish_seen_subcommand_from audit" -a "list verify"
 complete -c s1shell -n "__fish_seen_subcommand_from completion" -a "bash zsh fish"
 complete -c s1shell -n "__fish_seen_subcommand_from ai" -a "env analyze"
 complete -c s1shell -n "__fish_seen_subcommand_from mcp" -a "serve"
+complete -c s1shell -n "__fish_seen_subcommand_from intel" -a "env lookup advisory"
 
 complete -c s1shell -l format -x -a "table json md html sarif"
 complete -c s1shell -l preset -x -a "web api strict"

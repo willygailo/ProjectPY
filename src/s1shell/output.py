@@ -23,6 +23,7 @@ from s1shell.cve.models import CVESearchResult, DependencyAuditResult
 from s1shell.doctor import DoctorReport
 from s1shell.errors import ValidationError
 from s1shell.fingerprint.models import FingerprintResult
+from s1shell.intel.models import GitHubAdvisoryResult, IntelEnvStatus, IntelLookupResult
 from s1shell.models import dumps_json
 from s1shell.profile.models import ProfileResult
 from s1shell.report.sarif import render_dependency_sarif
@@ -1103,4 +1104,176 @@ def render_batch_assessment(
             str(item.cve_count),
             item.error or "—",
         )
+    _emit_tables([tbl], console=console, out_file=out_file, stdout=stdout)
+
+
+def render_intel_env(
+    result: IntelEnvStatus,
+    *,
+    fmt: str,
+    console: Console,
+    out_file: Path | None = None,
+    stdout: TextIO | None = None,
+) -> None:
+    """Render masked status of passive threat intelligence API keys."""
+    norm = _require_format(fmt, ("table", "json", "md"), command="intel env")
+    if norm == "json":
+        write_or_print(dumps_json(result), out_file=out_file, stdout=stdout)
+        return
+    if norm == "md":
+        lines = [
+            f"# S1shell Threat Intel Environment (`{result.env_file}`)",
+            "",
+            "| Feed | Env Var | Configured | Key | Source | Purpose |",
+            "|---|---|---|---|---|---|",
+        ]
+        for f in result.feeds:
+            lines.append(
+                f"| `{f.feed}` | `{f.env_var}` | {'yes' if f.configured else 'no'} | "
+                f"`{_md_cell(f.masked_key)}` | `{_md_cell(f.source)}` | {_md_cell(f.purpose)} |"
+            )
+        write_or_print("\n".join(lines), out_file=out_file, stdout=stdout)
+        return
+
+    tbl = Table(title=f"S1shell Threat Intel API Keys ({result.env_file})")
+    tbl.add_column("Feed", style="cyan", no_wrap=True)
+    tbl.add_column("Env Var", no_wrap=True)
+    tbl.add_column("Configured")
+    tbl.add_column("Masked Key")
+    tbl.add_column("Source")
+    tbl.add_column("Purpose")
+    for f in result.feeds:
+        tbl.add_row(
+            f.feed,
+            f.env_var,
+            "yes" if f.configured else "no",
+            f.masked_key or "—",
+            f.source,
+            f.purpose,
+        )
+    _emit_tables([tbl], console=console, out_file=out_file, stdout=stdout)
+
+
+def render_intel_lookup(
+    result: IntelLookupResult,
+    *,
+    fmt: str,
+    console: Console,
+    out_file: Path | None = None,
+    stdout: TextIO | None = None,
+) -> None:
+    """Render `s1shell intel lookup` multi-feed passive intelligence results."""
+    norm = _require_format(fmt, ("table", "json", "md"), command="intel lookup")
+    if norm == "json":
+        write_or_print(dumps_json(result), out_file=out_file, stdout=stdout)
+        return
+    if norm == "md":
+        lines = [
+            f"# S1shell Passive Threat Intel: `{result.indicator}` ({result.indicator_type})",
+            "",
+            f"- **Sources:** `{', '.join(result.sources_queried) or 'none'}` "
+            f"(cached={result.cached})",
+        ]
+        if result.virustotal:
+            vt = result.virustotal
+            lines.append(
+                f"- **VirusTotal:** malicious={vt.malicious}, suspicious={vt.suspicious}, "
+                f"harmless={vt.harmless}, reputation={vt.reputation} ({vt.gui_url})"
+            )
+        if result.greynoise:
+            gn = result.greynoise
+            lines.append(
+                f"- **GreyNoise ({gn.ip}):** classification=`{gn.classification}`, "
+                f"noise={gn.noise}, riot={gn.riot}, name=`{gn.name or '—'}`"
+            )
+        if result.urlscan:
+            us = result.urlscan
+            lines.append(
+                f"- **urlscan.io (`{us.query}`):** total={us.total_results}, "
+                f"servers=`{', '.join(us.observed_servers) or 'none'}`, "
+                f"ips=`{', '.join(us.observed_ips[:5]) or 'none'}`"
+            )
+        if result.warnings:
+            lines.extend(["", "## Warnings", ""])
+            for w in result.warnings:
+                lines.append(f"- {w}")
+        write_or_print("\n".join(lines), out_file=out_file, stdout=stdout)
+        return
+
+    tables: list[Table] = []
+    tbl = Table(
+        title=f"Passive Threat Intel: {result.indicator} ({result.indicator_type}, "
+        f"cached={result.cached})"
+    )
+    tbl.add_column("Source", style="cyan", no_wrap=True)
+    tbl.add_column("Summary")
+    if result.virustotal:
+        vt = result.virustotal
+        tbl.add_row(
+            "VirusTotal",
+            f"malicious={vt.malicious}, suspicious={vt.suspicious}, harmless={vt.harmless}, "
+            f"rep={vt.reputation} | AS={vt.as_owner or '—'} | {vt.gui_url}",
+        )
+    if result.greynoise:
+        gn = result.greynoise
+        tbl.add_row(
+            "GreyNoise",
+            f"ip={gn.ip} | class={gn.classification} | noise={gn.noise} | "
+            f"riot={gn.riot} ({gn.name or '—'})",
+        )
+    if result.urlscan:
+        us = result.urlscan
+        tbl.add_row(
+            "urlscan.io",
+            f"total={us.total_results} | servers={', '.join(us.observed_servers) or 'none'} | "
+            f"ips={', '.join(us.observed_ips[:5]) or 'none'}",
+        )
+    if result.warnings:
+        tbl.add_row("Warnings", "\n".join(result.warnings))
+    tables.append(tbl)
+    _emit_tables(tables, console=console, out_file=out_file, stdout=stdout)
+
+
+def render_ghsa_advisories(
+    result: GitHubAdvisoryResult,
+    *,
+    fmt: str,
+    console: Console,
+    out_file: Path | None = None,
+    stdout: TextIO | None = None,
+) -> None:
+    """Render GitHub Security Advisories (GHSA) query results."""
+    norm = _require_format(fmt, ("table", "json", "md"), command="intel advisory")
+    if norm == "json":
+        write_or_print(dumps_json(result), out_file=out_file, stdout=stdout)
+        return
+    if norm == "md":
+        lines = [
+            f"# GitHub Security Advisories (cached={result.cached})",
+            "",
+            "| GHSA ID | CVE ID | Severity | CVSS | Patched | Summary | URL |",
+            "|---|---|---|---|---|---|---|",
+        ]
+        for a in result.advisories:
+            patched = ", ".join(a.patched_versions[:3]) or "—"
+            cvss = str(a.cvss_score) if a.cvss_score is not None else "—"
+            lines.append(
+                f"| `{a.ghsa_id}` | `{a.cve_id or '—'}` | {a.severity} | {cvss} | "
+                f"`{_md_cell(patched)}` | {_md_cell(a.summary)} | {a.html_url} |"
+            )
+        write_or_print("\n".join(lines), out_file=out_file, stdout=stdout)
+        return
+
+    tbl = Table(title=f"GitHub Security Advisories (cached={result.cached})")
+    tbl.add_column("GHSA ID", style="cyan", no_wrap=True)
+    tbl.add_column("CVE ID", no_wrap=True)
+    tbl.add_column("Severity")
+    tbl.add_column("CVSS", justify="right")
+    tbl.add_column("Patched")
+    tbl.add_column("Summary")
+    for a in result.advisories:
+        patched = ", ".join(a.patched_versions[:3]) or "—"
+        cvss = f"{a.cvss_score:.1f}" if a.cvss_score is not None else "—"
+        summ = a.summary[:120] + ("..." if len(a.summary) > 120 else "")
+        tbl.add_row(a.ghsa_id, a.cve_id or "—", a.severity, cvss, patched, summ)
     _emit_tables([tbl], console=console, out_file=out_file, stdout=stdout)

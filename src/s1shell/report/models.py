@@ -27,6 +27,7 @@ class ReportBundle:
     profiles: list[dict[str, Any]] = field(default_factory=list)
     fingerprints: list[dict[str, Any]] = field(default_factory=list)
     cves: list[dict[str, Any]] = field(default_factory=list)
+    intel: list[dict[str, Any]] = field(default_factory=list)
     posture: dict[str, Any] | None = None
     findings: list[dict[str, Any]] = field(default_factory=list)
     ai_analysis: dict[str, Any] | None = None

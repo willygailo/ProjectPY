@@ -17,6 +17,7 @@ from s1shell.cve.enrichment import EPSSClient, KEVClient, enrich_records
 from s1shell.cve.models import CVERecord, CVESearchFilter, CVESearchResult
 from s1shell.cve.nvd import NVDClient, is_version_affected, parse_nvd_payload
 from s1shell.errors import ExitCode, NetworkError, ValidationError
+from s1shell.intel.clients import GitHubAdvisoryClient, parse_github_advisories_payload
 
 _CVE_ID_RE = re.compile(r"^CVE-\d{4}-\d{4,}$", re.IGNORECASE)
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -90,6 +91,7 @@ class CVEService:
         cveorg_client: CVEOrgClient | None = None,
         kev_client: KEVClient | None = None,
         epss_client: EPSSClient | None = None,
+        github_client: GitHubAdvisoryClient | None = None,
         audit_logger: AuditLogger | None = None,
     ) -> None:
         self.cfg = cfg
@@ -98,6 +100,9 @@ class CVEService:
         self.cveorg_client = cveorg_client if cveorg_client is not None else CVEOrgClient(cfg)
         self.kev_client = kev_client if kev_client is not None else KEVClient(cfg)
         self.epss_client = epss_client if epss_client is not None else EPSSClient(cfg)
+        self.github_client = (
+            github_client if github_client is not None else GitHubAdvisoryClient(cfg)
+        )
         self.audit_logger = audit_logger if audit_logger is not None else AuditLogger(cfg.audit_log)
 
     def search(
@@ -384,7 +389,46 @@ class CVEService:
                 offline=offline,
                 refresh=refresh,
             )
+            records = self._enrich_with_ghsa(records, offline=offline, refresh=refresh)
         return CVESearchResult(query={"cve_id": norm_id}, cached=cached, records=records)
+
+    def _enrich_with_ghsa(
+        self,
+        records: list[CVERecord],
+        *,
+        offline: bool,
+        refresh: bool,
+    ) -> list[CVERecord]:
+        out: list[CVERecord] = []
+        for rec in records:
+            gh_key = _build_cache_key("ghsa_cve", {"cve_id": rec.cve_id})
+            raw_adv = (
+                None
+                if refresh
+                else self.cache.get(gh_key, ttl_seconds=self.cfg.cve_cache_ttl_seconds)
+            )
+            if raw_adv is None and not offline and self.github_client.configured:
+                try:
+                    raw_adv = self.github_client.fetch_advisories(cve_id=rec.cve_id, per_page=5)
+                    self.cache.set(gh_key, raw_adv)
+                except NetworkError:
+                    raw_adv = None
+            advisories = parse_github_advisories_payload(raw_adv) if raw_adv else []
+            if advisories:
+                top = advisories[0]
+                merged_refs = list(dict.fromkeys([*rec.references, top.html_url]))
+                out.append(
+                    replace(
+                        rec,
+                        ghsa_id=top.ghsa_id,
+                        ghsa_url=top.html_url,
+                        patched_versions=top.patched_versions,
+                        references=merged_refs,
+                    )
+                )
+            else:
+                out.append(rec)
+        return out
 
     def get_many(
         self,

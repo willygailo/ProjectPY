@@ -36,6 +36,8 @@ from s1shell.errors import (
 from s1shell.fingerprint.matcher import match_signatures
 from s1shell.fingerprint.models import FingerprintResult
 from s1shell.fingerprint.service import FingerprintService
+from s1shell.intel.models import IntelLookupResult
+from s1shell.intel.service import IntelService
 from s1shell.models import dumps_json, to_json_compatible, utc_now_iso
 from s1shell.profile.service import ProfileService
 from s1shell.report.models import ReportBundle, ReportMetadata
@@ -77,6 +79,7 @@ def build_report_bundle_from_assessment(
         profiles=[to_json_compatible(result.profile)],
         fingerprints=[to_json_compatible(result.fingerprint)],
         cves=[to_json_compatible(result.cve)] if result.cve is not None else [],
+        intel=[to_json_compatible(result.intel)] if result.intel is not None else [],
         posture=to_json_compatible(result.posture),
         findings=[to_json_compatible(f) for f in result.findings],
         ai_analysis=(
@@ -99,6 +102,7 @@ class AssessService:
         profile_service: ProfileService | None = None,
         fingerprint_service: FingerprintService | None = None,
         cve_service: CVEService | None = None,
+        intel_service: IntelService | None = None,
         report_service: ReportService | None = None,
         ai_service: AIService | None = None,
         sleeper: Callable[[float], None] | None = None,
@@ -131,6 +135,11 @@ class AssessService:
             if cve_service is not None
             else CVEService(cfg, audit_logger=self.audit_logger)
         )
+        self.intel_service = (
+            intel_service
+            if intel_service is not None
+            else IntelService(cfg, audit_logger=self.audit_logger)
+        )
         self.report_service = (
             report_service
             if report_service is not None
@@ -152,6 +161,7 @@ class AssessService:
         check_methods: bool = False,
         skip_cve: bool = False,
         enrich_cve: bool = False,
+        run_intel: bool = False,
         min_cvss: float = 7.0,
         cve_limit: int = 10,
         offline_cve: bool = False,
@@ -273,10 +283,19 @@ class AssessService:
                 records=ordered,
             )
 
+        intel_res: IntelLookupResult | None = None
+        if run_intel:
+            intel_res = self.intel_service.lookup(
+                prof.url,
+                pinned_ip=prof.pinned_ip,
+                offline=offline_cve,
+            )
+
         posture, findings, suppressed = evaluate_posture_with_suppressions(
             prof,
             fp,
             cve_res,
+            intel=intel_res,
             preset=preset,
             ignore_findings=ignore_findings,
         )
@@ -327,6 +346,7 @@ class AssessService:
             profile=prof,
             fingerprint=fp,
             cve=cve_res,
+            intel=intel_res,
             ai_analysis=ai_res,
             preset=preset.strip().lower(),
             suppressed_findings=suppressed,
@@ -350,6 +370,11 @@ class AssessService:
                 cve_path = resolved_dir / "cves.json"
                 cve_path.write_text(dumps_json(cve_res), encoding="utf-8")
                 saved.append(str(cve_path))
+
+            if intel_res is not None:
+                intel_path = resolved_dir / "intel.json"
+                intel_path.write_text(dumps_json(intel_res), encoding="utf-8")
+                saved.append(str(intel_path))
 
             bundle = build_report_bundle_from_assessment(
                 result,
@@ -387,6 +412,7 @@ class AssessService:
         check_methods: bool = False,
         skip_cve: bool = False,
         enrich_cve: bool = False,
+        run_intel: bool = False,
         min_cvss: float = 7.0,
         cve_limit: int = 10,
         offline_cve: bool = False,
@@ -435,6 +461,7 @@ class AssessService:
                     check_methods=check_methods,
                     skip_cve=skip_cve,
                     enrich_cve=enrich_cve,
+                    run_intel=run_intel,
                     min_cvss=min_cvss,
                     cve_limit=cve_limit,
                     offline_cve=offline_cve,

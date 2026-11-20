@@ -381,6 +381,42 @@
     {% endfor %}
     {% endif %}
 
+    {% if bundle.intel %}
+    <h2>Passive Threat Intelligence</h2>
+    {% for it in bundle.intel %}
+    <div class="card">
+      <h3>{{ it.indicator }} <span class="muted">({{ it.indicator_type }}{% if it.get("resolved_ip") %} / IP: {{ it.resolved_ip }}{% endif %})</span></h3>
+      {% if it.get("virustotal") %}
+      <p>
+        <strong>VirusTotal:</strong>
+        Malicious=<strong>{{ it.virustotal.malicious }}</strong>,
+        Suspicious=<strong>{{ it.virustotal.suspicious }}</strong>,
+        Harmless={{ it.virustotal.harmless }},
+        Reputation={{ it.virustotal.reputation }}
+        {% if it.virustotal.get("as_owner") %}| AS Owner: <code>{{ it.virustotal.as_owner }}</code>{% endif %}
+      </p>
+      {% endif %}
+      {% if it.get("greynoise") %}
+      <p>
+        <strong>GreyNoise:</strong>
+        Classification=<span class="badge {{ 'HIGH' if it.greynoise.classification == 'malicious' else ('ok' if it.greynoise.riot else 'INFO') }}">{{ it.greynoise.classification }}</span> |
+        Noise={{ "Yes" if it.greynoise.noise else "No" }} |
+        RIOT (Benign Infra)={{ "Yes" if it.greynoise.riot else "No" }}
+        {% if it.greynoise.get("name") %}({{ it.greynoise.name }}){% endif %}
+      </p>
+      {% endif %}
+      {% if it.get("urlscan") %}
+      <p>
+        <strong>urlscan.io (Passive Index):</strong>
+        Total Indexed Scans=<strong>{{ it.urlscan.total_results }}</strong>
+        {% if it.urlscan.get("observed_servers") %}| Observed Servers: <code>{{ it.urlscan.observed_servers | join(", ") }}</code>{% endif %}
+        {% if it.urlscan.get("observed_ips") %}| Observed IPs: <code>{{ it.urlscan.observed_ips[:6] | join(", ") }}</code>{% endif %}
+      </p>
+      {% endif %}
+    </div>
+    {% endfor %}
+    {% endif %}
+
     {% if bundle.cves %}
     <h2>CVE Triage Findings</h2>
     {% for cve_bundle in bundle.cves %}

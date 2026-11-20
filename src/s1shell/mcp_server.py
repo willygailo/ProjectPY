@@ -18,6 +18,7 @@ from s1shell.cve.service import CVEService
 from s1shell.doctor import run_doctor
 from s1shell.errors import S1ShellError
 from s1shell.fingerprint.service import FingerprintService
+from s1shell.intel.service import IntelService
 from s1shell.models import dumps_json
 from s1shell.scope import ScopeManager
 
@@ -144,6 +145,40 @@ TOOLS_SPEC: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "s1shell_intel_lookup",
+        "description": (
+            "Query passive third-party threat intelligence (VirusTotal, GreyNoise, "
+            "urlscan.io Search) for a domain or IP (zero target contact)."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "indicator": {"type": "string"},
+                "pinned_ip": {"type": "string"},
+                "sources": {"type": "array", "items": {"type": "string"}},
+                "offline": {"type": "boolean", "default": False},
+            },
+            "required": ["indicator"],
+        },
+    },
+    {
+        "name": "s1shell_intel_advisory",
+        "description": (
+            "Query GitHub Security Advisories (GHSA) by CVE ID or ecosystem+package "
+            "(zero target contact)."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "cve_id": {"type": "string"},
+                "ecosystem": {"type": "string"},
+                "package": {"type": "string"},
+                "limit": {"type": "integer", "default": 15},
+                "offline": {"type": "boolean", "default": False},
+            },
+        },
+    },
+    {
         "name": "s1shell_audit_list",
         "description": (
             "Read recent append-only JSONL audit log entries with optional filters (offline)."
@@ -177,6 +212,7 @@ class S1ShellMCPServer:
         *,
         cve_service: CVEService | None = None,
         dep_audit_service: DependencyAuditService | None = None,
+        intel_service: IntelService | None = None,
         fingerprint_service: FingerprintService | None = None,
         scope_manager: ScopeManager | None = None,
         audit_logger: AuditLogger | None = None,
@@ -195,6 +231,11 @@ class S1ShellMCPServer:
             dep_audit_service
             if dep_audit_service is not None
             else DependencyAuditService(cfg, audit_logger=self.audit_logger)
+        )
+        self.intel_service = (
+            intel_service
+            if intel_service is not None
+            else IntelService(cfg, audit_logger=self.audit_logger)
         )
         self.fingerprint_service = (
             fingerprint_service
@@ -256,6 +297,25 @@ class S1ShellMCPServer:
             assess_path = Path(str(arguments.get("assess_path", "")))
             stack = str(arguments.get("stack") or "auto")
             return dumps_json(generate_remediation_from_file(assess_path, stack=stack))
+        if name == "s1shell_intel_lookup":
+            raw_sources = arguments.get("sources")
+            src_list = [str(s) for s in raw_sources] if isinstance(raw_sources, list) else None
+            intel_res = self.intel_service.lookup(
+                str(arguments.get("indicator", "")),
+                pinned_ip=arguments.get("pinned_ip"),
+                sources=src_list,
+                offline=bool(arguments.get("offline", False)),
+            )
+            return dumps_json(intel_res)
+        if name == "s1shell_intel_advisory":
+            adv_res = self.intel_service.advisories(
+                cve_id=arguments.get("cve_id"),
+                ecosystem=arguments.get("ecosystem"),
+                package=arguments.get("package"),
+                limit=int(arguments.get("limit", 15)),
+                offline=bool(arguments.get("offline", False)),
+            )
+            return dumps_json(adv_res)
         if name == "s1shell_audit_list":
             events = self.audit_logger.read_recent(
                 limit=int(arguments.get("limit", 50)),
