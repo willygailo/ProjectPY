@@ -21,8 +21,10 @@ from s1shell.cve.service import CVEService
 from s1shell.doctor import run_doctor
 from s1shell.fingerprint.models import FingerprintResult
 from s1shell.intel.clients import (
+    CrtShClient,
     GitHubAdvisoryClient,
     GreyNoiseClient,
+    RDAPClient,
     URLScanClient,
     VirusTotalClient,
 )
@@ -367,3 +369,64 @@ def test_assess_with_intel_scoring_html_autoescape_and_mcp(
     assert resp["result"]["isError"] is False
     parsed_mcp = json.loads(resp["result"]["content"][0]["text"])
     assert parsed_mcp["virustotal"]["malicious"] == 4
+
+
+def test_intel_clients_retry_on_429_and_503_with_retry_after(tmp_config: RuntimeConfig) -> None:
+    delays: list[float] = []
+    vt_attempts = 0
+
+    def vt_flaky(_req: httpx.Request) -> httpx.Response:
+        nonlocal vt_attempts
+        vt_attempts += 1
+        if vt_attempts == 1:
+            return httpx.Response(429, headers={"Retry-After": "3"})
+        return httpx.Response(200, json={"data": {"attributes": {"reputation": 5}}})
+
+    vt_client = VirusTotalClient(
+        tmp_config,
+        api_key="fake-vt-key-00000000",
+        transport=httpx.MockTransport(vt_flaky),
+        sleeper=delays.append,
+    )
+    vt_data = vt_client.fetch("example.com", indicator_type="domain")
+    assert vt_attempts == 2
+    assert delays == [3.0]
+    assert vt_data["data"]["attributes"]["reputation"] == 5
+
+    crt_attempts = 0
+
+    def crt_flaky(_req: httpx.Request) -> httpx.Response:
+        nonlocal crt_attempts
+        crt_attempts += 1
+        if crt_attempts < 3:
+            return httpx.Response(503)
+        return httpx.Response(200, json=[{"id": 1, "common_name": "app.example.com"}])
+
+    crt_client = CrtShClient(
+        tmp_config,
+        transport=httpx.MockTransport(crt_flaky),
+        sleeper=delays.append,
+    )
+    crt_rows = crt_client.fetch_domain("example.com")
+    assert crt_attempts == 3
+    assert delays == [3.0, 1.0, 2.0]
+    assert len(crt_rows) == 1
+
+    rdap_attempts = 0
+
+    def rdap_flaky(_req: httpx.Request) -> httpx.Response:
+        nonlocal rdap_attempts
+        rdap_attempts += 1
+        if rdap_attempts == 1:
+            return httpx.Response(429, headers={"Retry-After": "999"})  # capped at 30s
+        return httpx.Response(200, json={"ldhName": "example.com"})
+
+    rdap_client = RDAPClient(
+        tmp_config,
+        transport=httpx.MockTransport(rdap_flaky),
+        sleeper=delays.append,
+    )
+    rdap_data, _ = rdap_client.fetch("example.com", indicator_type="domain")
+    assert rdap_attempts == 2
+    assert delays[-1] == 30.0
+    assert rdap_data["ldhName"] == "example.com"

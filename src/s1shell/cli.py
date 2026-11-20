@@ -1208,6 +1208,7 @@ def dispatch(
                 ai_redact=bool(args.redact),
                 preset=args.preset,
                 ignore_findings=ignored or None,
+                include_remediation=not bool(args.no_remediate),
                 operator=args.operator,
                 out_dir=args.out_dir,
             )

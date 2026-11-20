@@ -15,9 +15,8 @@ from s1shell.audit import AuditEvent, AuditLogger
 from s1shell.config import (
     SUPPORTED_AI_PROVIDERS,
     RuntimeConfig,
-    chmod_private_file,
+    atomic_write_private,
     classify_anthropic_key,
-    ensure_private_dir,
     load_dotenv_file,
     mask_api_key,
 )
@@ -170,13 +169,11 @@ class AIService:
         if clean_model is not None:
             existing[_PROVIDER_MODEL_VARS[active_prov]] = clean_model
 
-        if target_path.parent == self._cfg.home_dir:
-            ensure_private_dir(target_path.parent)
-        else:
-            target_path.parent.mkdir(parents=True, exist_ok=True)
-
-        target_path.write_text(_format_dotenv(existing), encoding="utf-8")
-        chmod_private_file(target_path)
+        atomic_write_private(
+            target_path,
+            _format_dotenv(existing),
+            private_parent=(target_path.parent == self._cfg.home_dir),
+        )
 
         if env_file is not None:
             saved_key = existing.get(_PROVIDER_KEY_VARS[active_prov], "").strip() or None

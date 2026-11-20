@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "s1shell"
-version = "0.4.1"
+version = "0.4.2"
 description = "Open-source CLI toolkit for authorized CVE research, scoped target profiling, passive fingerprinting, and reporting."
 readme = "README.md"
 license = { text = "MIT" }
@@ -36,11 +36,11 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/s1shell/s1shell"
-Repository = "https://github.com/s1shell/s1shell"
-Issues = "https://github.com/s1shell/s1shell/issues"
-Changelog = "https://github.com/s1shell/s1shell/blob/main/CHANGELOG.md"
-Security = "https://github.com/s1shell/s1shell/blob/main/SECURITY.md"
+Homepage = "https://github.com/willygailo/ProjectPY"
+Repository = "https://github.com/willygailo/ProjectPY"
+Issues = "https://github.com/willygailo/ProjectPY/issues"
+Changelog = "https://github.com/willygailo/ProjectPY/blob/main/CHANGELOG.md"
+Security = "https://github.com/willygailo/ProjectPY/blob/main/SECURITY.md"
 
 [project.optional-dependencies]
 dev = [

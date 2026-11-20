@@ -229,13 +229,18 @@ def test_codec_cli_stdin_file_raw_caesar_and_mcp(
     assert rc_h == 0
     assert json.loads(out_h.getvalue())["hashes"]["md5"] == "5d41402abc4b2a76b9719d911017c592"
 
-    # MCP server exposes all 3 codec tools (17 read-only tools total)
+    # MCP server exposes all 4 codec tools (19 read-only tools total)
     mcp = S1ShellMCPServer(tmp_config)
     list_resp = mcp.handle_request({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
     assert list_resp is not None
     names = [t["name"] for t in list_resp["result"]["tools"]]
-    assert len(names) == 17
-    assert {"s1shell_codec_decode", "s1shell_codec_encode", "s1shell_codec_inspect"} <= set(names)
+    assert len(names) == 19
+    assert {
+        "s1shell_codec_decode",
+        "s1shell_codec_encode",
+        "s1shell_codec_inspect",
+        "s1shell_codec_hash",
+    } <= set(names)
 
     enc_resp = mcp.handle_request(
         {

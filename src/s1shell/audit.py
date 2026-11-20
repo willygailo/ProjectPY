@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
+import os
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - non-POSIX fallback
+    fcntl = None  # type: ignore[assignment]
 
 from s1shell import __version__
 from s1shell.config import chmod_private_file, ensure_private_dir
@@ -172,21 +179,38 @@ class AuditLogger:
     def __init__(self, log_path: Path) -> None:
         self.log_path = log_path
 
-    def _last_chain_hash(self) -> str:
-        """Inspect the last non-empty log line to determine the previous hash link."""
-        if not self.log_path.exists():
+    def _read_last_nonempty_line(self, handle: BinaryIO) -> str | None:
+        """Read the final non-empty UTF-8 line from an open binary file handle in O(1) tail I/O."""
+        handle.seek(0, os.SEEK_END)
+        file_size = handle.tell()
+        if file_size == 0:
+            return None
+
+        chunk_size = 8192
+        pos = file_size
+        buf = b""
+        while pos > 0:
+            read_len = min(chunk_size, pos)
+            pos -= read_len
+            handle.seek(pos, os.SEEK_SET)
+            buf = handle.read(read_len) + buf
+            stripped_tail = buf.rstrip(b"\r\n \t")
+            if not stripped_tail:
+                continue
+            nl_idx = stripped_tail.rfind(b"\n")
+            if nl_idx != -1:
+                candidate = stripped_tail[nl_idx + 1 :].decode("utf-8", errors="replace").strip()
+                if candidate:
+                    return candidate
+            elif pos == 0:
+                candidate = stripped_tail.decode("utf-8", errors="replace").strip()
+                return candidate or None
+        return None
+
+    def _chain_hash_from_line(self, last_line: str | None) -> str:
+        """Derive the previous chain hash from the final JSONL line (or GENESIS if empty)."""
+        if not last_line:
             return GENESIS_HASH
-        try:
-            lines = [
-                ln.strip()
-                for ln in self.log_path.read_text(encoding="utf-8").splitlines()
-                if ln.strip()
-            ]
-        except OSError:
-            return GENESIS_HASH
-        if not lines:
-            return GENESIS_HASH
-        last_line = lines[-1]
         try:
             last_event = AuditEvent.from_json_line(last_line)
             if last_event.entry_hash:
@@ -195,12 +219,34 @@ class AuditLogger:
             pass
         return hashlib.sha256(last_line.encode("utf-8")).hexdigest()
 
+    def _last_chain_hash(self) -> str:
+        """Inspect the last non-empty log line to determine the previous hash link."""
+        if not self.log_path.exists():
+            return GENESIS_HASH
+        try:
+            with self.log_path.open("rb") as handle:
+                return self._chain_hash_from_line(self._read_last_nonempty_line(handle))
+        except OSError:
+            return GENESIS_HASH
+
     def log(self, event: AuditEvent) -> None:
-        """Append one hash-chained audit line and enforce 0600 permissions."""
+        """Append one hash-chained audit line atomically under an exclusive file lock."""
         ensure_private_dir(self.log_path.parent)
-        chained = event.with_chain(self._last_chain_hash())
-        with self.log_path.open("a", encoding="utf-8") as handle:
-            handle.write(chained.to_json_line() + "\n")
+        fd = os.open(self.log_path, os.O_RDWR | os.O_CREAT, 0o600)
+        with os.fdopen(fd, "r+b") as handle:
+            if fcntl is not None:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            try:
+                prev_hash = self._chain_hash_from_line(self._read_last_nonempty_line(handle))
+                chained = event.with_chain(prev_hash)
+                handle.seek(0, os.SEEK_END)
+                handle.write((chained.to_json_line() + "\n").encode("utf-8"))
+                handle.flush()
+                with contextlib.suppress(OSError):
+                    os.fsync(handle.fileno())
+            finally:
+                if fcntl is not None:
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
         chmod_private_file(self.log_path)
 
     def verify(self) -> AuditVerifyResult:

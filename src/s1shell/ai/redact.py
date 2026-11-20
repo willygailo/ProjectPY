@@ -8,8 +8,30 @@ from typing import Any
 from urllib.parse import urlsplit
 
 _IPV4_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
+_IPV6_RE = re.compile(
+    r"(?<![A-Za-z0-9:_])"
+    r"(?:[0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}(?:\.\d{1,3}){0,3}"
+    r"(?![A-Za-z0-9:_])"
+)
 _EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
+_QUERY_SECRET_RE = re.compile(
+    r"([?&](?:token|access_token|id_token|refresh_token|api_key|apikey|key|secret|"
+    r"password|passwd|sig|signature|auth|session|session_id|jwt)=)([^&#\s\"'<>]+)",
+    re.IGNORECASE,
+)
+_BEARER_RE = re.compile(r"\b(Bearer\s+)([A-Za-z0-9._~+/=-]{8,})", re.IGNORECASE)
+_JWT_INLINE_RE = re.compile(
+    r"\b(eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]*)(?![A-Za-z0-9_-])"
+)
 _SENSITIVE_KEYS = {"scope_id", "auth_ref", "owner", "operator"}
+_SENSITIVE_AUTH_HEADERS = {"authorization", "proxy-authorization"}
+_SENSITIVE_SECRET_HEADERS = {
+    "x-api-key",
+    "api-key",
+    "x-auth-token",
+    "x-csrf-token",
+    "x-xsrf-token",
+}
 
 
 class TelemetryRedactor:
@@ -84,8 +106,22 @@ class TelemetryRedactor:
                 return raw
             return self._token("TARGET_IP", raw)
 
+        def _repl_ipv6(match: re.Match[str]) -> str:
+            raw = match.group(0)
+            if raw == "::":
+                return raw
+            try:
+                ipaddress.IPv6Address(raw)
+            except ValueError:
+                return raw
+            return self._token("TARGET_IP", raw)
+
+        out = _IPV6_RE.sub(_repl_ipv6, out)
         out = _IPV4_RE.sub(_repl_ip, out)
         out = _EMAIL_RE.sub(lambda m: self._token("EMAIL", m.group(0)), out)
+        out = _QUERY_SECRET_RE.sub(r"\1[REDACTED_PARAM]", out)
+        out = _BEARER_RE.sub(r"\1[REDACTED_TOKEN]", out)
+        out = _JWT_INLINE_RE.sub("[REDACTED_JWT]", out)
         return out
 
     def redact_artifact(self, data: Any) -> Any:
@@ -102,10 +138,29 @@ class TelemetryRedactor:
                 for pair in obj:
                     if isinstance(pair, list) and len(pair) == 2:
                         h_name, h_val = str(pair[0]), str(pair[1])
-                        if h_name.lower() == "set-cookie" and "=" in h_val:
+                        low_h = h_name.lower()
+                        if low_h == "set-cookie" and "=" in h_val:
                             c_name, rest = h_val.split("=", 1)
                             attrs = ";" + rest.split(";", 1)[1] if ";" in rest else ""
                             h_val = f"{c_name}=[REDACTED_COOKIE_VALUE]{attrs}"
+                        elif low_h == "cookie":
+                            scrubbed_parts: list[str] = []
+                            for seg in h_val.split(";"):
+                                if "=" in seg:
+                                    k_part = seg.split("=", 1)[0].strip()
+                                    scrubbed_parts.append(f"{k_part}=[REDACTED_COOKIE_VALUE]")
+                                elif seg.strip():
+                                    scrubbed_parts.append("[REDACTED_COOKIE_VALUE]")
+                            h_val = "; ".join(scrubbed_parts)
+                        elif low_h in _SENSITIVE_AUTH_HEADERS:
+                            parts = h_val.strip().split(None, 1)
+                            h_val = (
+                                f"{parts[0]} [REDACTED_AUTH_HEADER]"
+                                if len(parts) == 2
+                                else "[REDACTED_AUTH_HEADER]"
+                            )
+                        elif low_h in _SENSITIVE_SECRET_HEADERS:
+                            h_val = "[REDACTED_HEADER_VALUE]"
                         redacted_headers.append([h_name, self.redact_text(h_val)])
                     else:
                         redacted_headers.append(self._walk(pair))

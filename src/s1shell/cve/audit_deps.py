@@ -26,6 +26,7 @@ from s1shell.cve.models import (
     DependencyVuln,
     compute_cve_priority,
 )
+from s1shell.cve.nvd import compare_versions
 from s1shell.errors import ExitCode, NetworkError, ValidationError
 from s1shell.http import build_intel_client
 
@@ -137,13 +138,19 @@ def _parse_toml_lock_packages(raw_text: str, *, ecosystem: str) -> list[tuple[st
 
 
 def build_upgrade_commands(vulns: list[DependencyVuln]) -> list[str]:
-    """Generate deterministic safe upgrade commands grouped by package ecosystem."""
+    """Generate deterministic safe upgrade commands picking the highest required fixed version."""
     upgrades: dict[tuple[str, str], str] = {}
     for v in vulns:
         if not v.fixed_versions:
             continue
         key = (v.ecosystem, v.package)
-        upgrades[key] = v.fixed_versions[-1]
+        for cand in v.fixed_versions:
+            cleaned = cand.strip()
+            if not cleaned:
+                continue
+            existing = upgrades.get(key)
+            if existing is None or compare_versions(cleaned, existing) > 0:
+                upgrades[key] = cleaned
 
     by_eco: dict[str, list[tuple[str, str]]] = {}
     for (eco, pkg), ver in sorted(upgrades.items()):

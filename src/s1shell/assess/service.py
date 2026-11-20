@@ -423,6 +423,7 @@ class AssessService:
         ai_redact: bool = False,
         preset: str = "web",
         ignore_findings: set[str] | None = None,
+        include_remediation: bool = True,
         operator: str | None = None,
         out_dir: Path | None = None,
     ) -> BatchAssessmentResult:
@@ -472,6 +473,7 @@ class AssessService:
                     ai_redact=ai_redact,
                     preset=preset,
                     ignore_findings=ignore_findings,
+                    include_remediation=include_remediation,
                     operator=operator,
                     out_dir=target_dir,
                 )

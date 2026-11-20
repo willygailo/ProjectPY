@@ -2,6 +2,19 @@
 
 All notable changes to S1shell will be documented in this file.
 
+## [0.4.2] - 2026-11-20
+
+### Security & Reliability Hardening
+- **Scope Guard SSRF & Exclusion Hardening (`scope.py`)**: Hardened `is_special_ip()` to block non-global ranges including RFC 6598 CGNAT (`100.64.0.0/10`, covering Tailscale and cloud metadata endpoints like `100.100.100.200`), NAT64 (`64:ff9b::/96`), and embedded IPv4-mapped IPv6 addresses (`::ffff:0:0/96`), and unwrapped embedded IPv4 addresses during both direct-IP and DNS-resolved `--exclude` matching.
+- **Race-Free, `O(1)` Hash-Chained Audit Log (`audit.py`)**: Replaced full-file read + unlocked append with exclusive POSIX `fcntl.flock` locking, atomic `0600` creation, and backward EOF tail-seeking so concurrent CLI/MCP writes preserve SHA-256 hash chain integrity.
+- **Atomic `0600` Credential & Scope Writes (`config.py`, `scope.py`, `ai/service.py`, `intel/service.py`)**: Added `atomic_write_private()` using `os.open(..., 0o600)` on a temp file + `os.replace()` to eliminate the `0644 -> 0600` permission window and partial-write corruption on `scope.yaml` and `.env`.
+- **Hardened Cloud AI Telemetry Redactor (`ai/redact.py`)**: Added IPv6 address redaction, sensitive header scrubbing (`Cookie`, `Authorization`, `Proxy-Authorization`, `X-Api-Key`, `X-Auth-Token`, `X-CSRF-Token`), sensitive URL query parameter redaction, and inline Bearer/JWT redaction.
+
+### Fixed & Improved
+- **MCP Server Sync & Read-Only Tools (`mcp_server.py`)**: Synced `s1shell_cve_audit` schema (`recursive` flag and all 14 lockfile/SBOM formats), added batch `cve_ids` support to `s1shell_cve_get`, updated `s1shell_intel_lookup`/`s1shell_remediate` descriptions, and added `s1shell_codec_hash` and `s1shell_scope_check` (`19` strictly read-only tools total).
+- **Intel Client Resilience (`intel/clients.py`)**: Added bounded retry/backoff on HTTP `429`/`502`/`503`/`504` (honoring `Retry-After`) across VirusTotal, GreyNoise, urlscan.io, GitHub Advisories, `crt.sh`, and RDAP clients.
+- **Batch `--no-remediate` & Dependency Upgrade Selection**: Forwarded `--no-remediate` in `assess --targets-file` batch mode, fixed `build_upgrade_commands()` to choose the highest semantic fixed version across multiple CVEs via `compare_versions()`, and aligned `pyproject.toml` repository URLs.
+
 ## [0.4.1] - 2026-11-20
 
 ### Added — Offline Codec, Multi-Layer Auto-Decoder & Smart Artifact Inspector (`s1shell codec`)

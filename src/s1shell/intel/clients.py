@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any
 
@@ -20,6 +22,53 @@ from s1shell.intel.models import (
     URLScanSummary,
     VirusTotalIntel,
 )
+
+_RETRYABLE_STATUS_CODES = {429, 502, 503, 504}
+
+
+def _parse_retry_after(value: str | None) -> float | None:
+    if not value:
+        return None
+    cleaned = value.strip()
+    try:
+        delay = float(cleaned)
+    except ValueError:
+        return None
+    return min(max(delay, 0.0), 30.0)
+
+
+def _get_with_retry(
+    cfg: RuntimeConfig,
+    url: str,
+    *,
+    service_name: str,
+    params: dict[str, str] | None = None,
+    headers: dict[str, str] | None = None,
+    transport: httpx.BaseTransport | None = None,
+    follow_redirects: bool = False,
+    sleeper: Callable[[float], None] | None = None,
+    max_attempts: int = 3,
+) -> httpx.Response:
+    """Execute a read-only intel GET with bounded backoff on HTTP 429/502/503/504."""
+    sleep_fn = sleeper if sleeper is not None else time.sleep
+    with build_intel_client(
+        cfg,
+        transport=transport,
+        follow_redirects=follow_redirects,
+    ) as client:
+        for attempt in range(max_attempts):
+            try:
+                resp = client.get(url, params=params, headers=headers)
+            except httpx.HTTPError as exc:
+                raise NetworkError(f"{service_name} request failed: {exc}") from exc
+
+            if resp.status_code in _RETRYABLE_STATUS_CODES and attempt < max_attempts - 1:
+                retry_delay = _parse_retry_after(resp.headers.get("Retry-After"))
+                delay = retry_delay if retry_delay is not None else float(2**attempt)
+                sleep_fn(delay)
+                continue
+            return resp
+    raise NetworkError(f"{service_name} retries exhausted.")
 
 
 def _epoch_to_iso(ts: object) -> str | None:
@@ -184,11 +233,13 @@ class VirusTotalClient:
         *,
         api_key: str | None = None,
         transport: httpx.BaseTransport | None = None,
+        sleeper: Callable[[float], None] | None = None,
     ) -> None:
         self._cfg = cfg
         resolved = api_key if api_key is not None else cfg.get_virustotal_api_key()[0]
         self._api_key = resolved.strip() if resolved and resolved.strip() else None
         self._transport = transport
+        self._sleeper = sleeper
 
     @property
     def configured(self) -> bool:
@@ -201,11 +252,14 @@ class VirusTotalClient:
         endpoint = "ip_addresses" if indicator_type == "ip" else "domains"
         url = f"{self._cfg.virustotal_api_url.rstrip('/')}/{endpoint}/{indicator}"
         headers = {"x-apikey": self._api_key}
-        try:
-            with build_intel_client(self._cfg, transport=self._transport) as client:
-                resp = client.get(url, headers=headers)
-        except httpx.HTTPError as exc:
-            raise NetworkError(f"VirusTotal API request failed: {exc}") from exc
+        resp = _get_with_retry(
+            self._cfg,
+            url,
+            service_name="VirusTotal API",
+            headers=headers,
+            transport=self._transport,
+            sleeper=self._sleeper,
+        )
         if resp.status_code != 200:
             raise NetworkError(f"VirusTotal API returned HTTP {resp.status_code}")
         try:
@@ -224,11 +278,13 @@ class GreyNoiseClient:
         *,
         api_key: str | None = None,
         transport: httpx.BaseTransport | None = None,
+        sleeper: Callable[[float], None] | None = None,
     ) -> None:
         self._cfg = cfg
         resolved = api_key if api_key is not None else cfg.get_greynoise_api_key()[0]
         self._api_key = resolved.strip() if resolved and resolved.strip() else None
         self._transport = transport
+        self._sleeper = sleeper
 
     @property
     def configured(self) -> bool:
@@ -240,11 +296,14 @@ class GreyNoiseClient:
             raise NetworkError("GREYNOISE_API_KEY is not configured.")
         url = f"{self._cfg.greynoise_api_url.rstrip('/')}/{ip}"
         headers = {"key": self._api_key}
-        try:
-            with build_intel_client(self._cfg, transport=self._transport) as client:
-                resp = client.get(url, headers=headers)
-        except httpx.HTTPError as exc:
-            raise NetworkError(f"GreyNoise API request failed: {exc}") from exc
+        resp = _get_with_retry(
+            self._cfg,
+            url,
+            service_name="GreyNoise API",
+            headers=headers,
+            transport=self._transport,
+            sleeper=self._sleeper,
+        )
         if resp.status_code == 404:
             return {
                 "ip": ip,
@@ -271,11 +330,13 @@ class URLScanClient:
         *,
         api_key: str | None = None,
         transport: httpx.BaseTransport | None = None,
+        sleeper: Callable[[float], None] | None = None,
     ) -> None:
         self._cfg = cfg
         resolved = api_key if api_key is not None else cfg.get_urlscan_api_key()[0]
         self._api_key = resolved.strip() if resolved and resolved.strip() else None
         self._transport = transport
+        self._sleeper = sleeper
 
     @property
     def configured(self) -> bool:
@@ -287,11 +348,15 @@ class URLScanClient:
         if self._api_key:
             headers["API-Key"] = self._api_key
         params = {"q": query, "size": str(min(max(size, 1), 25))}
-        try:
-            with build_intel_client(self._cfg, transport=self._transport) as client:
-                resp = client.get(self._cfg.urlscan_api_url, params=params, headers=headers)
-        except httpx.HTTPError as exc:
-            raise NetworkError(f"urlscan.io Search API request failed: {exc}") from exc
+        resp = _get_with_retry(
+            self._cfg,
+            self._cfg.urlscan_api_url,
+            service_name="urlscan.io Search API",
+            params=params,
+            headers=headers,
+            transport=self._transport,
+            sleeper=self._sleeper,
+        )
         if resp.status_code != 200:
             raise NetworkError(f"urlscan.io Search API returned HTTP {resp.status_code}")
         try:
@@ -310,11 +375,13 @@ class GitHubAdvisoryClient:
         *,
         token: str | None = None,
         transport: httpx.BaseTransport | None = None,
+        sleeper: Callable[[float], None] | None = None,
     ) -> None:
         self._cfg = cfg
         resolved = token if token is not None else cfg.get_github_token()[0]
         self._token = resolved.strip() if resolved and resolved.strip() else None
         self._transport = transport
+        self._sleeper = sleeper
 
     @property
     def configured(self) -> bool:
@@ -342,11 +409,15 @@ class GitHubAdvisoryClient:
             params["ecosystem"] = ecosystem.strip().lower()
         if package:
             params["affects"] = package.strip()
-        try:
-            with build_intel_client(self._cfg, transport=self._transport) as client:
-                resp = client.get(self._cfg.github_advisories_url, params=params, headers=headers)
-        except httpx.HTTPError as exc:
-            raise NetworkError(f"GitHub Advisories API request failed: {exc}") from exc
+        resp = _get_with_retry(
+            self._cfg,
+            self._cfg.github_advisories_url,
+            service_name="GitHub Advisories API",
+            params=params,
+            headers=headers,
+            transport=self._transport,
+            sleeper=self._sleeper,
+        )
         if resp.status_code != 200:
             raise NetworkError(f"GitHub Advisories API returned HTTP {resp.status_code}")
         try:
@@ -605,19 +676,24 @@ class CrtShClient:
         cfg: RuntimeConfig,
         *,
         transport: httpx.BaseTransport | None = None,
+        sleeper: Callable[[float], None] | None = None,
     ) -> None:
         self._cfg = cfg
         self._transport = transport
+        self._sleeper = sleeper
 
     def fetch_domain(self, domain: str) -> list[dict[str, Any]]:
         """Query `https://crt.sh/?q=%.<domain>&output=json` passively."""
         cleaned = domain.strip().lower().rstrip(".")
         params = {"q": f"%.{cleaned}", "output": "json"}
-        try:
-            with build_intel_client(self._cfg, transport=self._transport) as client:
-                resp = client.get(self._cfg.crtsh_api_url, params=params)
-        except httpx.HTTPError as exc:
-            raise NetworkError(f"crt.sh CT log request failed: {exc}") from exc
+        resp = _get_with_retry(
+            self._cfg,
+            self._cfg.crtsh_api_url,
+            service_name="crt.sh CT log",
+            params=params,
+            transport=self._transport,
+            sleeper=self._sleeper,
+        )
         if resp.status_code == 404:
             return []
         if resp.status_code != 200:
@@ -642,23 +718,25 @@ class RDAPClient:
         cfg: RuntimeConfig,
         *,
         transport: httpx.BaseTransport | None = None,
+        sleeper: Callable[[float], None] | None = None,
     ) -> None:
         self._cfg = cfg
         self._transport = transport
+        self._sleeper = sleeper
 
     def fetch(self, indicator: str, *, indicator_type: str) -> tuple[dict[str, Any], str]:
         """Fetch RDAP JSON for a domain or IP via RFC 7484 bootstrap (`follow_redirects=True`)."""
         endpoint = "ip" if indicator_type == "ip" else "domain"
         url = f"{self._cfg.rdap_base_url.rstrip('/')}/{endpoint}/{indicator.strip()}"
-        try:
-            with build_intel_client(
-                self._cfg, transport=self._transport, follow_redirects=True
-            ) as client:
-                resp = client.get(
-                    url, headers={"Accept": "application/rdap+json, application/json"}
-                )
-        except httpx.HTTPError as exc:
-            raise NetworkError(f"RDAP request failed: {exc}") from exc
+        resp = _get_with_retry(
+            self._cfg,
+            url,
+            service_name="RDAP",
+            headers={"Accept": "application/rdap+json, application/json"},
+            transport=self._transport,
+            follow_redirects=True,
+            sleeper=self._sleeper,
+        )
         if resp.status_code != 200:
             raise NetworkError(f"RDAP server returned HTTP {resp.status_code}")
         try:

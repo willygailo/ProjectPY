@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import contextlib
 import os
+import secrets
 from dataclasses import dataclass
 from pathlib import Path
 
 from s1shell import __version__
 
-DEFAULT_PROJECT_URL = "https://github.com/s1shell/s1shell"
+DEFAULT_PROJECT_URL = "https://github.com/willygailo/ProjectPY"
 DEFAULT_TIMEOUT_SECONDS = 10.0
 DEFAULT_MAX_RESPONSE_BYTES = 2 * 1024 * 1024  # 2 MiB
 DEFAULT_MAX_CONCURRENCY = 1
@@ -114,6 +115,40 @@ def chmod_private_file(path: Path) -> None:
     if path.exists():
         with contextlib.suppress(OSError):
             os.chmod(path, 0o600)
+
+
+def atomic_write_private(
+    path: Path,
+    content: str,
+    *,
+    private_parent: bool = False,
+) -> None:
+    """Atomically write UTF-8 text to `path` with owner-only `0600` permissions from creation."""
+    if private_parent:
+        ensure_private_dir(path.parent)
+    else:
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+    tmp_path = path.parent / f".{path.name}.{secrets.token_hex(8)}.tmp"
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    fd = os.open(tmp_path, flags, 0o600)
+    fd_owned = True
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            fd_owned = False
+            handle.write(content)
+            handle.flush()
+            with contextlib.suppress(OSError):
+                os.fsync(handle.fileno())
+        chmod_private_file(tmp_path)
+        os.replace(tmp_path, path)
+    except BaseException:
+        if fd_owned:
+            with contextlib.suppress(OSError):
+                os.close(fd)
+        with contextlib.suppress(OSError):
+            tmp_path.unlink()
+        raise
 
 
 @dataclass(frozen=True)

@@ -42,6 +42,23 @@ TOOLS_SPEC: list[dict[str, Any]] = [
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
+        "name": "s1shell_scope_check",
+        "description": (
+            "Check whether a target URL, domain, or IP matches active scope.yaml allow/exclude "
+            "rules and verify safe DNS resolution (never sends HTTP/TLS packets to target)."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "target": {
+                    "type": "string",
+                    "description": "Target URL, domain, IPv4, or IPv6 to validate against scope.",
+                }
+            },
+            "required": ["target"],
+        },
+    },
+    {
         "name": "s1shell_fingerprint_from_profile",
         "description": (
             "Passively identify technologies/CDNs/WAFs from a saved profile.json "
@@ -81,29 +98,36 @@ TOOLS_SPEC: list[dict[str, Any]] = [
     {
         "name": "s1shell_cve_get",
         "description": (
-            "Retrieve detailed NVD + CVE.org intelligence for a specific CVE ID "
+            "Retrieve detailed NVD + CVE.org + GHSA intelligence for one or more CVE IDs "
             "(zero target contact)."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
-                "cve_id": {"type": "string"},
+                "cve_id": {"type": "string", "description": "Single CVE ID (e.g. CVE-2021-23017)."},
+                "cve_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Batch list of CVE IDs to look up together.",
+                },
                 "offline": {"type": "boolean", "default": False},
                 "enrich": {"type": "boolean", "default": False},
             },
-            "required": ["cve_id"],
         },
     },
     {
         "name": "s1shell_cve_audit",
         "description": (
-            "Audit pinned lockfiles (requirements.txt, package-lock.json, go.mod, "
-            "Cargo.lock) or CycloneDX SBOMs via OSV.dev + KEV/EPSS (zero target contact)."
+            "Audit pinned lockfiles (requirements.txt, uv.lock, poetry.lock, Pipfile.lock, "
+            "package-lock.json, yarn.lock, pnpm-lock.yaml, go.mod, Cargo.lock, composer.lock, "
+            "Gemfile.lock, pom.xml), CycloneDX/SPDX 2.3 SBOMs, or a directory recursively via "
+            "OSV.dev + CVSS v3.1 + CISA KEV/EPSS (zero target contact)."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "file_path": {"type": "string"},
+                "recursive": {"type": "boolean", "default": False},
                 "offline": {"type": "boolean", "default": False},
                 "enrich": {"type": "boolean", "default": False},
                 "kev_only": {"type": "boolean", "default": False},
@@ -130,7 +154,7 @@ TOOLS_SPEC: list[dict[str, Any]] = [
         "name": "s1shell_remediate",
         "description": (
             "Generate deterministic offline defensive hardening configuration snippets "
-            "from a saved assess.json artifact."
+            "(nginx/apache/caddy/express/generic + DNS + security.txt) from a saved assess.json."
         ),
         "inputSchema": {
             "type": "object",
@@ -149,7 +173,7 @@ TOOLS_SPEC: list[dict[str, Any]] = [
         "name": "s1shell_intel_lookup",
         "description": (
             "Query passive third-party threat intelligence (VirusTotal, GreyNoise, "
-            "urlscan.io Search) for a domain or IP (zero target contact)."
+            "urlscan.io Search, RDAP) for a domain or IP (zero target contact)."
         ),
         "inputSchema": {
             "type": "object",
@@ -280,6 +304,25 @@ TOOLS_SPEC: list[dict[str, Any]] = [
             "required": ["text"],
         },
     },
+    {
+        "name": "s1shell_codec_hash",
+        "description": (
+            "Compute offline cryptographic digests (md5, sha1, sha256, sha384, sha512, "
+            "blake2b, crc32) and Shannon entropy for input text."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string"},
+                "algos": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional subset of algorithms to compute.",
+                },
+            },
+            "required": ["text"],
+        },
+    },
 ]
 
 
@@ -333,6 +376,9 @@ class S1ShellMCPServer:
             return dumps_json(run_doctor(self.cfg))
         if name == "s1shell_scope_list":
             return dumps_json({"entries": self.scope_manager.load()})
+        if name == "s1shell_scope_check":
+            target = str(arguments.get("target", ""))
+            return dumps_json(self.scope_manager.check_target(target))
         if name == "s1shell_fingerprint_from_profile":
             path = Path(str(arguments.get("profile_path", "")))
             return dumps_json(self.fingerprint_service.from_profile(path))
@@ -354,12 +400,20 @@ class S1ShellMCPServer:
             )
             return dumps_json(res)
         if name == "s1shell_cve_get":
-            cve_id = str(arguments.get("cve_id", ""))
-            res = self.cve_service.get(
-                cve_id,
-                offline=bool(arguments.get("offline", False)),
-                enrich=bool(arguments.get("enrich", False)),
-            )
+            raw_ids = arguments.get("cve_ids")
+            if isinstance(raw_ids, list) and raw_ids:
+                res = self.cve_service.get_many(
+                    [str(cid) for cid in raw_ids],
+                    offline=bool(arguments.get("offline", False)),
+                    enrich=bool(arguments.get("enrich", False)),
+                )
+            else:
+                cve_id = str(arguments.get("cve_id", ""))
+                res = self.cve_service.get(
+                    cve_id,
+                    offline=bool(arguments.get("offline", False)),
+                    enrich=bool(arguments.get("enrich", False)),
+                )
             return dumps_json(res)
         if name == "s1shell_cve_audit":
             fpath = Path(str(arguments.get("file_path", "")))
@@ -438,6 +492,15 @@ class S1ShellMCPServer:
                 max_depth=int(arguments.get("max_depth", 6)),
             )
             return dumps_json(ins_res)
+        if name == "s1shell_codec_hash":
+            raw_algos = arguments.get("algos")
+            algos_list = [str(a) for a in raw_algos] if isinstance(raw_algos, list) else None
+            hash_res = self.codec_service.hash_data(
+                str(arguments.get("text", "")).encode("utf-8"),
+                source="mcp",
+                algos=algos_list,
+            )
+            return dumps_json(hash_res)
         if name == "s1shell_audit_list":
             events = self.audit_logger.read_recent(
                 limit=int(arguments.get("limit", 50)),

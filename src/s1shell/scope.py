@@ -15,7 +15,7 @@ from urllib.parse import urlsplit
 
 import yaml
 
-from s1shell.config import chmod_private_file, ensure_private_dir
+from s1shell.config import atomic_write_private
 from s1shell.errors import OutOfScopeError, ValidationError
 from s1shell.models import utc_now, utc_now_iso
 
@@ -25,6 +25,9 @@ ResolverFn = Callable[[str], list[str]]
 
 _DOMAIN_LABEL_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 _ALLOWED_SCHEMES = {"http", "https"}
+_CGNAT_NET = ipaddress.IPv4Network("100.64.0.0/10")
+_NAT64_WELL_KNOWN_NET = ipaddress.IPv6Network("64:ff9b::/96")
+_NAT64_LOCAL_NET = ipaddress.IPv6Network("64:ff9b:1::/48")
 
 
 @dataclass(frozen=True)
@@ -308,10 +311,34 @@ def parse_scope_spec(raw_spec: str, *, include_subdomains: bool = False) -> tupl
     return "domain", host, include_subdomains
 
 
+def _unwrap_embedded_ipv4(ip_obj: IPAddr) -> ipaddress.IPv4Address | None:
+    """Extract an embedded IPv4 address from IPv4-mapped, NAT64, 6to4, or Teredo IPv6 literals."""
+    if not isinstance(ip_obj, ipaddress.IPv6Address):
+        return None
+    if ip_obj.ipv4_mapped is not None:
+        return ip_obj.ipv4_mapped
+    if ip_obj in _NAT64_WELL_KNOWN_NET or ip_obj in _NAT64_LOCAL_NET:
+        return ipaddress.IPv4Address(int(ip_obj) & 0xFFFFFFFF)
+    if ip_obj.sixtofour is not None:
+        return ip_obj.sixtofour
+    if ip_obj.teredo is not None:
+        return ip_obj.teredo[1]
+    return None
+
+
 def is_special_ip(ip_obj: IPAddr) -> bool:
-    """Return True if an IP belongs to private, loopback, link-local, or reserved ranges."""
+    """Return True if an IP is non-global, private, loopback, link-local, CGNAT, or NAT64."""
+    if isinstance(ip_obj, ipaddress.IPv6Address):
+        embedded = _unwrap_embedded_ipv4(ip_obj)
+        if embedded is not None and is_special_ip(embedded):
+            return True
+        if ip_obj in _NAT64_WELL_KNOWN_NET or ip_obj in _NAT64_LOCAL_NET:
+            return True
+    elif ip_obj in _CGNAT_NET:
+        return True
     return (
-        ip_obj.is_private
+        not ip_obj.is_global
+        or ip_obj.is_private
         or ip_obj.is_loopback
         or ip_obj.is_link_local
         or ip_obj.is_multicast
@@ -349,20 +376,32 @@ def _host_matches(candidate: str, entry_host: str, include_subdomains: bool) -> 
     return include_subdomains and candidate.endswith("." + entry_host)
 
 
-def _ip_explicitly_covered(ip_obj: IPAddr, entries: list[ScopeEntry]) -> bool:
-    """Check whether an IP is explicitly authorized by an active ip, cidr, or IP url_prefix."""
-    ip_str = str(ip_obj)
-    for entry in entries:
-        if entry.type == "ip" and entry.target == ip_str:
-            return True
-        if entry.type == "cidr":
-            net: IPNet = ipaddress.ip_network(entry.target, strict=False)
-            if ip_obj in net:
+def _ip_explicitly_covered(
+    ip_obj: IPAddr,
+    entries: list[ScopeEntry],
+    *,
+    unwrap_embedded: bool = False,
+) -> bool:
+    """Check whether an IP (or optional embedded IPv4) is covered by active ip/cidr/url entries."""
+    candidates: list[IPAddr] = [ip_obj]
+    if unwrap_embedded:
+        embedded = _unwrap_embedded_ipv4(ip_obj)
+        if embedded is not None:
+            candidates.append(embedded)
+
+    for cand in candidates:
+        ip_str = str(cand)
+        for entry in entries:
+            if entry.type == "ip" and entry.target == ip_str:
                 return True
-        if entry.type == "url_prefix":
-            prefix_parsed = parse_target(entry.target)
-            if prefix_parsed.is_ip and prefix_parsed.host == ip_str:
-                return True
+            if entry.type == "cidr":
+                net: IPNet = ipaddress.ip_network(entry.target, strict=False)
+                if cand.version == net.version and cand in net:
+                    return True
+            if entry.type == "url_prefix":
+                prefix_parsed = parse_target(entry.target)
+                if prefix_parsed.is_ip and prefix_parsed.host == ip_str:
+                    return True
     return False
 
 
@@ -451,11 +490,13 @@ class ScopeManager:
         return [ScopeEntry.from_dict(item) for item in raw["entries"]]
 
     def save(self, entries: list[ScopeEntry]) -> None:
-        """Persist scope entries to YAML with owner-only permissions."""
-        ensure_private_dir(self.scope_file.parent)
+        """Persist scope entries atomically to YAML with owner-only permissions."""
         payload = {"version": 1, "entries": [entry.to_dict() for entry in entries]}
-        self.scope_file.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
-        chmod_private_file(self.scope_file)
+        atomic_write_private(
+            self.scope_file,
+            yaml.safe_dump(payload, sort_keys=False),
+            private_parent=True,
+        )
 
     def add(
         self,
@@ -667,6 +708,22 @@ class ScopeManager:
                 ),
             )
 
+        if (
+            parsed.is_ip
+            and parsed.ip_obj is not None
+            and _ip_explicitly_covered(parsed.ip_obj, exclude_entries, unwrap_embedded=True)
+        ):
+            return ScopeCheckResult(
+                in_scope=False,
+                parsed_target=parsed,
+                matched_entry=None,
+                resolved_ips=[],
+                pinned_ip=None,
+                reason=(
+                    f"Target '{raw_target}' maps to an explicitly excluded IP address in scope."
+                ),
+            )
+
         structural_matches = sorted(
             (e for e in allow_entries if entry_matches_structurally(e, parsed)),
             key=lambda e: _match_specificity(e, parsed),
@@ -722,7 +779,7 @@ class ScopeManager:
                         pinned_ip=None,
                         reason=f"Invalid resolved IP '{ip_str}' for '{parsed.host}'.",
                     )
-                if _ip_explicitly_covered(ip_obj, exclude_entries):
+                if _ip_explicitly_covered(ip_obj, exclude_entries, unwrap_embedded=True):
                     return ScopeCheckResult(
                         in_scope=False,
                         parsed_target=parsed,

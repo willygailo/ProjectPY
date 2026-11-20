@@ -44,3 +44,43 @@ def test_audit_logger_appends_jsonl_and_reads_recent(audit_logger: AuditLogger) 
     assert len(audit_logger.read_recent(outcome="blocked_out_of_scope")) == 1
     assert len(audit_logger.read_recent(category="target", command="profile")) == 2
     assert len(audit_logger.read_recent(target="blocked")) == 1
+
+
+def test_audit_logger_concurrent_appends_and_large_tail_preserve_hash_chain(
+    audit_logger: AuditLogger,
+) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    # First write an oversized entry (> 10 KiB) to exercise multi-chunk backward tail seeking
+    audit_logger.log(
+        AuditEvent.create(
+            category="target",
+            command="profile",
+            target="https://large.example.com",
+            outcome="error",
+            exit_code=1,
+            error="E" * 12_000,
+        )
+    )
+
+    def _worker(worker_id: int) -> None:
+        for i in range(10):
+            audit_logger.log(
+                AuditEvent.create(
+                    category="target",
+                    command="profile",
+                    target=f"https://w{worker_id}-{i}.example.com",
+                    outcome="success",
+                    exit_code=0,
+                    duration_ms=i,
+                )
+            )
+
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        list(pool.map(_worker, range(6)))
+
+    verify_res = audit_logger.verify()
+    assert verify_res.valid is True
+    assert verify_res.total_entries == 61
+    assert verify_res.chained_entries == 61
+    assert verify_res.errors == []

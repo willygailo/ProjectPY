@@ -11,9 +11,14 @@ import httpx
 from s1shell.audit import AuditLogger
 from s1shell.cli import build_parser, dispatch
 from s1shell.config import RuntimeConfig
-from s1shell.cve.audit_deps import DependencyAuditService, OSVClient, parse_dependency_file
+from s1shell.cve.audit_deps import (
+    DependencyAuditService,
+    OSVClient,
+    build_upgrade_commands,
+    parse_dependency_file,
+)
 from s1shell.cve.enrichment import EPSSClient, KEVClient
-from s1shell.cve.models import CPEAffectedRange, compute_cve_priority
+from s1shell.cve.models import CPEAffectedRange, DependencyVuln, compute_cve_priority
 from s1shell.cve.nvd import NVDClient, is_version_affected
 from s1shell.cve.rate_limit import RateLimiter
 from s1shell.cve.service import CVEService
@@ -247,3 +252,39 @@ def test_cve_get_multi_id_with_enrichment(
     assert len(res.records) == 1
     assert res.records[0].in_kev is True
     assert res.records[0].priority == "P0-IMMEDIATE"
+
+
+def test_build_upgrade_commands_picks_highest_semantic_fixed_version() -> None:
+    vulns = [
+        DependencyVuln(
+            ecosystem="PyPI",
+            package="urllib3",
+            version="1.26.4",
+            vuln_id="GHSA-1",
+            fixed_versions=["1.26.18", "1.26.9"],
+        ),
+        DependencyVuln(
+            ecosystem="PyPI",
+            package="urllib3",
+            version="1.26.4",
+            vuln_id="GHSA-2",
+            fixed_versions=["1.26.5"],
+        ),
+        DependencyVuln(
+            ecosystem="npm",
+            package="lodash",
+            version="4.17.10",
+            vuln_id="GHSA-3",
+            fixed_versions=["4.17.21"],
+        ),
+        DependencyVuln(
+            ecosystem="npm",
+            package="lodash",
+            version="4.17.10",
+            vuln_id="GHSA-4",
+            fixed_versions=["4.17.12"],
+        ),
+    ]
+    cmds = build_upgrade_commands(vulns)
+    assert 'pip install --upgrade "urllib3>=1.26.18"' in cmds
+    assert "npm install lodash@4.17.21" in cmds

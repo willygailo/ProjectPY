@@ -263,6 +263,7 @@ def test_batch_assessment_html_dashboard_ci_gate_and_diff(
             "--delay",
             "0",
             "--skip-cve",
+            "--no-remediate",
             "--check-methods",
             "--fail-on",
             "HIGH",
@@ -282,6 +283,9 @@ def test_batch_assessment_html_dashboard_ci_gate_and_diff(
     assert "Batch Assessment Report" in html_out.getvalue()
     assert (out_dir / "batch_report.html").is_file()
     assert (out_dir / "batch_summary.json").is_file()
+    first_assess_path = out_dir / "01_https_ok.example.com" / "assess.json"
+    first_assess = json.loads(first_assess_path.read_text(encoding="utf-8"))
+    assert first_assess["remediation_snippets"] == []
 
     # Posture drift diff & regression detection
     base_json = tmp_path / "base.json"

@@ -184,3 +184,64 @@ def test_scope_specificity_duplicate_replace_and_mixed_case_remove(
     removed = scope_manager.remove("https://app.example.com/API")
     assert len(removed) == 1
     assert removed[0].auth_ref == "NEW-REF"
+
+
+def test_scope_blocks_cgnat_nat64_and_ipv4_mapped_exclusion_bypass(tmp_path: Path) -> None:
+    import stat
+
+    resolved_map = {
+        "cgnat.example.com": ["100.64.0.1"],
+        "alibaba-meta.example.com": ["100.100.100.200"],
+        "nat64.example.com": ["64:ff9b::127.0.0.1"],
+        "mapped-meta.example.com": ["::ffff:169.254.169.254"],
+        "mapped-excluded.example.com": ["::ffff:93.184.216.34"],
+        "ok.example.com": ["93.184.216.35"],
+    }
+
+    mgr = ScopeManager(
+        tmp_path / "scope.yaml",
+        resolver=lambda host: resolved_map[host],
+    )
+    mgr.add(
+        "*.example.com",
+        owner="ACME",
+        auth_ref="SOW-SEC-1",
+        expires="2099-12-31",
+    )
+    mgr.add(
+        "93.184.216.34",
+        owner="ACME",
+        auth_ref="SOW-SEC-1",
+        expires="2099-12-31",
+        exclude=True,
+    )
+
+    # Atomic private write leaves 0600 permissions and no temporary siblings
+    assert stat.S_IMODE(mgr.scope_file.stat().st_mode) == 0o600
+    assert list(tmp_path.glob("*.tmp")) == []
+
+    # CGNAT / Tailscale / cloud metadata / NAT64 / IPv4-mapped private IPs fail closed
+    for host in (
+        "https://cgnat.example.com",
+        "https://alibaba-meta.example.com",
+        "https://nat64.example.com",
+        "https://mapped-meta.example.com",
+    ):
+        res = mgr.check_target(host)
+        assert res.in_scope is False
+        assert "special/private ip" in res.reason.lower()
+
+    # IPv4-mapped IPv6 cannot bypass IPv4 --exclude (either via DNS or direct IP target)
+    dns_excl = mgr.check_target("https://mapped-excluded.example.com")
+    assert dns_excl.in_scope is False
+    assert "excluded" in dns_excl.reason.lower()
+
+    mgr.add("::ffff:93.184.216.0/120", owner="ACME", auth_ref="SOW-SEC-1", expires="2099-12-31")
+    direct_excl = mgr.check_target("::ffff:93.184.216.34")
+    assert direct_excl.in_scope is False
+    assert "excluded" in direct_excl.reason.lower()
+
+    # Explicitly authorizing CGNAT IP/CIDR allows intentional private-overlay assessment
+    mgr.add("100.64.0.0/10", owner="Tailnet", auth_ref="LAB-2", expires="2099-12-31")
+    assert mgr.check_target("https://cgnat.example.com").in_scope is True
+    assert mgr.check_target("https://ok.example.com").in_scope is True

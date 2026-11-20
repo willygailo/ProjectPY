@@ -112,6 +112,48 @@ def test_telemetry_redactor_reversible_anonymization() -> None:
     assert "198.51.100.7" in restored
 
 
+def test_telemetry_redactor_scrubs_ipv6_auth_headers_query_secrets_and_jwt() -> None:
+    red = TelemetryRedactor()
+    sample_jwt = (
+        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
+        "eyJzdWIiOiIxMjM0NTY3ODkwIn0."
+        "SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
+    )
+    sample = {
+        "url": "https://api.acme.corp/callback?access_token=tok_secret_123&sig=deadbeef&page=1",
+        "pinned_ip": "2001:db8::42",
+        "note": (
+            f"Observed IPv6 fe80::1 and Bearer supersecretbearer99 and {sample_jwt} at 12:34:56"
+        ),
+        "raw_headers": [
+            ["Authorization", "Bearer topsecret_auth_token"],
+            ["Cookie", "sid=abc123; theme=dark"],
+            ["X-Api-Key", "sk-live-9999999999"],
+        ],
+    }
+    redacted = red.redact_artifact(sample)
+    serialized = json.dumps(redacted)
+    assert "2001:db8::42" not in serialized
+    assert "fe80::1" not in serialized
+    assert "12:34:56" in serialized  # timestamps must not be mistaken for IPv6
+    assert "tok_secret_123" not in serialized
+    assert "deadbeef" not in serialized
+    assert "page=1" in serialized
+    assert "topsecret_auth_token" not in serialized
+    assert "abc123" not in serialized
+    assert "sk-live-9999999999" not in serialized
+    assert "supersecretbearer99" not in serialized
+    assert sample_jwt not in serialized
+    assert "Bearer [REDACTED_AUTH_HEADER]" in serialized
+    assert "[REDACTED_HEADER_VALUE]" in serialized
+    assert "[REDACTED_PARAM]" in serialized
+    assert "[REDACTED_JWT]" in serialized
+
+    restored = red.restore_text(f"Allow {redacted['pinned_ip']} on {redacted['url']}")
+    assert "2001:db8::42" in restored
+    assert "api.acme.corp" in restored
+
+
 def test_readonly_mcp_server_protocol_and_tools(
     tmp_config: RuntimeConfig,
     tmp_path: Path,
@@ -169,8 +211,50 @@ def test_readonly_mcp_server_protocol_and_tools(
     assert len(responses) == 5
     assert responses[0]["result"]["serverInfo"]["name"] == "s1shell-readonly-mcp"
     tool_names = {t["name"] for t in responses[1]["result"]["tools"]}
-    assert {"s1shell_remediate", "s1shell_cve_audit", "s1shell_audit_verify"}.issubset(tool_names)
+    assert {
+        "s1shell_scope_check",
+        "s1shell_remediate",
+        "s1shell_cve_audit",
+        "s1shell_codec_hash",
+        "s1shell_audit_verify",
+    }.issubset(tool_names)
+    tools_by_name = {t["name"]: t for t in responses[1]["result"]["tools"]}
+    assert "recursive" in tools_by_name["s1shell_cve_audit"]["inputSchema"]["properties"]
+    assert "cve_ids" in tools_by_name["s1shell_cve_get"]["inputSchema"]["properties"]
     rem_payload = json.loads(responses[2]["result"]["content"][0]["text"])
     assert rem_payload["selected_stack"] == "nginx"
     assert responses[3]["result"]["isError"] is False
     assert responses[4]["error"]["code"] == -32601
+
+    # Verify new read-only `s1shell_scope_check` and `s1shell_codec_hash` MCP tools
+    mgr = ScopeManager(tmp_config.scope_file, resolver=lambda _h: ["93.184.216.34"])
+    mgr.add("app.example.com", owner="ACME", auth_ref="SOW-1", expires="2099-12-31")
+    srv2 = S1ShellMCPServer(tmp_config, scope_manager=mgr)
+    sc_resp = srv2.handle_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 10,
+            "method": "tools/call",
+            "params": {
+                "name": "s1shell_scope_check",
+                "arguments": {"target": "https://app.example.com"},
+            },
+        }
+    )
+    assert sc_resp is not None and sc_resp["result"]["isError"] is False
+    assert json.loads(sc_resp["result"]["content"][0]["text"])["in_scope"] is True
+
+    ch_resp = srv2.handle_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 11,
+            "method": "tools/call",
+            "params": {
+                "name": "s1shell_codec_hash",
+                "arguments": {"text": "hello", "algos": ["md5", "sha256"]},
+            },
+        }
+    )
+    assert ch_resp is not None and ch_resp["result"]["isError"] is False
+    ch_data = json.loads(ch_resp["result"]["content"][0]["text"])
+    assert ch_data["hashes"]["md5"] == "5d41402abc4b2a76b9719d911017c592"

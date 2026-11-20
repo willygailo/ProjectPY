@@ -14,8 +14,7 @@ from typing import Any
 from s1shell.audit import AuditEvent, AuditLogger
 from s1shell.config import (
     RuntimeConfig,
-    chmod_private_file,
-    ensure_private_dir,
+    atomic_write_private,
     load_dotenv_file,
     mask_api_key,
 )
@@ -190,13 +189,11 @@ class IntelService:
         existing = load_dotenv_file(target_path)
         existing.update(updates)
 
-        if target_path.parent == self.cfg.home_dir:
-            ensure_private_dir(target_path.parent)
-        else:
-            target_path.parent.mkdir(parents=True, exist_ok=True)
-
-        target_path.write_text(_format_dotenv(existing), encoding="utf-8")
-        chmod_private_file(target_path)
+        atomic_write_private(
+            target_path,
+            _format_dotenv(existing),
+            private_parent=(target_path.parent == self.cfg.home_dir),
+        )
 
         if env_file is not None:
             feeds: list[IntelFeedKeyStatus] = []
