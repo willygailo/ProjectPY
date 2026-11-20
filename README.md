@@ -106,6 +106,124 @@ s1shell completion fish > ~/.config/fish/completions/s1shell.fish
 
 ---
 
+## How to Use S1shell
+
+S1shell commands fall into two clear modes:
+
+| Mode | Scope & `--authorized` Required? | Commands |
+|---|---|---|
+| **Zero-Target-Contact (Instant)** | No — never sends packets to a target | `doctor`, `cve search\|get\|audit`, `intel env\|lookup\|advisory`, `fingerprint --from-profile`, `remediate`, `diff`, `report build`, `audit`, `mcp serve` |
+| **Authorized Target Mode** | **Yes** — must match `scope.yaml` + `--authorized` | `profile`, `fingerprint <target>`, `assess <target \| --targets-file>` |
+
+> If you did not install via `pipx`, prefix commands with `PYTHONPATH=src python3 -m s1shell` instead of `s1shell`.
+
+### Recipe 1: Run Your First Authorized Target Assessment (3 Steps)
+
+Every target-touching run follows the same 3-step loop: **Add Scope → Verify Scope → Assess**.
+
+```bash
+# 1. Add your authorized target (supports domain, *.domain, IP, CIDR, or URL prefix)
+s1shell scope add example.com --include-subdomains \
+  --owner "ACME IT" --ref "SOW-2026-014" --expires 2026-12-31 \
+  --notes "Quarterly web posture review"
+
+# Optional: add an IP/CIDR or block out-of-scope subdomains with --exclude
+s1shell scope add 203.0.113.0/24 --owner "ACME IT" --ref "SOW-2026-014" --expires 2026-12-31
+s1shell scope add payments.example.com --exclude --owner "ACME IT" --ref "SOW-2026-014" --expires 2026-12-31
+
+# 2. Confirm DNS resolution and scope status before touching the target
+s1shell scope check https://app.example.com
+
+# 3. Run the all-in-one read-only assessment and save the full report bundle
+s1shell assess https://app.example.com --authorized \
+  --enrich-cve --intel --well-known --check-methods \
+  --operator "Jane Doe" --out-dir ./results
+```
+
+**What gets generated inside `./results/`:**
+
+```text
+results/
+├── report.html        # Open in your browser for the full executive & technical report
+├── report.md          # Markdown report ready for tickets, wikis, or PRs
+├── report.sarif       # SARIF 2.1.0 findings for GitHub Code Scanning / VS Code
+├── assess.json        # Master artifact used by `remediate`, `diff`, and `ai analyze`
+├── profile.json       # Raw DNS, TLS, HTTP headers, cookies, & passive HTML telemetry
+├── fingerprint.json   # Detected server, CDN, WAF, framework, & JS library CPEs
+├── cves.json          # Matched CVEs with KEV, EPSS, & SSVC priority tiers
+└── intel.json         # Passive VirusTotal, GreyNoise, & urlscan.io Search context (--intel)
+```
+
+> Batch runs (`s1shell assess --targets-file urls.txt --authorized --out-dir ./batch-out`) also generate `batch_report.html` (consolidated dashboard), `batch_summary.json`, and numbered per-target subfolders (`01_<target>/`, `02_<target>/`, ...).
+
+**What to run next (100% offline):**
+
+```bash
+# Generate copy-paste server/DNS hardening configs directly from assess.json
+s1shell remediate ./results/assess.json --stack auto --format md --out ./results/hardening.md
+
+# After fixes are deployed, compare baseline vs re-test for posture drift
+s1shell diff ./baseline/assess.json ./results/assess.json --fail-on-regression
+```
+
+### Recipe 2: Passive Threat Intel & CVE Research (No Scope Needed)
+
+Run threat-intelligence lookups and vulnerability research immediately without sending any packet to the target:
+
+```bash
+# Passive VirusTotal + GreyNoise + urlscan.io Search lookup (cached in ~/.s1shell/cache.db)
+s1shell intel lookup example.com
+s1shell intel lookup 93.184.216.34 --sources vt,greynoise
+
+# GitHub Security Advisories (GHSA) by CVE or package ecosystem
+s1shell intel advisory --cve CVE-2023-45803
+s1shell intel advisory --ecosystem pip --package requests
+
+# NVD + CVE.org + GHSA + KEV/EPSS vulnerability lookup
+s1shell cve search --keyword "nginx 1.18" --min-cvss 7.0 --enrich
+s1shell cve get CVE-2021-23017 CVE-2023-44487 --enrich
+```
+
+### Recipe 3: Scan Local Lockfiles or SBOMs (Zero Target Contact)
+
+```bash
+s1shell cve audit requirements.txt --enrich
+s1shell cve audit package-lock.json --enrich --fail-on HIGH
+s1shell cve audit sbom.cdx.json --enrich --format sarif --out sbom.sarif
+```
+
+### Recipe 4: Bulk Scope Import & Multi-Target Batch Assessment
+
+Create a newline-delimited `targets.txt` (lines starting with `#` are ignored; prefix `!` marks an exclusion rule):
+
+```text
+# Authorized production web apps
+app.example.com
+api.example.com
+!billing.example.com
+```
+
+Preview and import the scope, then assess sequentially (`concurrency=1`):
+
+```bash
+s1shell scope import targets.txt --owner "ACME IT" --ref "SOW-2026-014" --expires 2026-12-31 --dry-run
+s1shell scope import targets.txt --owner "ACME IT" --ref "SOW-2026-014" --expires 2026-12-31
+
+s1shell assess --targets-file in_scope_urls.txt --authorized \
+  --delay 0.5 --enrich-cve --intel --out-dir ./batch-out
+```
+
+### Quick Troubleshooting
+
+| Symptom / Exit Code | Cause | Fix |
+|---|---|---|
+| `exit 2` (`OutOfScopeError`) | Target is not in `scope.yaml`, expired, excluded, or resolves to an un-scoped private/loopback IP | Run `s1shell scope list` and `s1shell scope check <target>`, then add/renew via `s1shell scope add ... --replace` |
+| `exit 3` (`UnauthorizedError`) | Running a target command non-interactively without confirmation | Pass `--authorized` explicitly |
+| `exit 4` (`PolicyGateError`) | Findings breached `--fail-on`, `--min-score`, or `--fail-on-regression` | Expected CI/CD gate failure — review findings or adjust thresholds / `--ignore-finding <ID>` |
+| Intel/AI feed skipped or rate-limited | Missing or misconfigured API key in `.env` | Run `s1shell doctor` and `s1shell intel env` / `s1shell ai env` to check masked key status |
+
+---
+
 ## Quickstart: 10-Step Advanced Assessment Workflow
 
 ### 1. Verify Environment & Audit Chain Integrity
