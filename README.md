@@ -76,6 +76,8 @@ cd ProjectPY
 
 #### Option A — Kali Linux (Recommended)
 
+`./scripts/install-kali.sh` checks Python `3.10+`, installs Kali/Debian prerequisites (`python3-venv`, `python3-pip`, `pipx`) via `apt`, installs `s1shell` globally via `pipx` (or into `.venv` with `--dev`), and runs `s1shell doctor` to verify the setup:
+
 ```bash
 ./scripts/install-kali.sh
 # Or editable development setup inside .venv:
