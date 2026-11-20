@@ -87,9 +87,11 @@ cd ProjectPY
 #### Option B — Standard Linux / Python 3.10+ with `pipx`
 
 ```bash
+pipx ensurepath
 pipx install .
-# Upgrade an existing local install after `git pull`:
-pipx install --force .
+
+# Recommended for local development (auto-reflects code edits):
+pipx install --editable --force .
 ```
 
 #### Option C — Contributor / Local Source Verification
@@ -100,7 +102,15 @@ source .venv/bin/activate
 make check
 ```
 
-> Running directly from source without `pipx`? Replace `s1shell` with `PYTHONPATH=src python3 -m s1shell` in all commands below.
+> **Seeing `zsh: command not found: s1shell` or `bash: s1shell: command not found`?**
+> 1. Install the CLI first (`./scripts/install-kali.sh` or `pipx install --editable --force .`).
+> 2. Ensure `~/.local/bin` is on your `PATH`, then refresh your shell command cache:
+>    ```bash
+>    export PATH="$HOME/.local/bin:$PATH"
+>    rehash          # zsh (or `hash -r` in bash)
+>    which s1shell   # expected: ~/.local/bin/s1shell
+>    ```
+> 3. Or run directly from source with zero installation: `PYTHONPATH=src python3 -m s1shell doctor`
 
 ### 1.2 Enable Shell Tab-Completion (`bash`, `zsh`, `fish`)
 
@@ -153,10 +163,15 @@ s1shell ai env --provider ollama --model "llama3.1:8b"
 
 ### 1.4 Verify Your Setup
 
+Run these three commands to confirm `s1shell` is on your `PATH`, signatures/API keys load cleanly, and the hash-chained audit log is healthy:
+
 ```bash
-s1shell doctor
-s1shell audit verify
+s1shell --version       # expected: s1shell 0.4.2
+s1shell doctor          # expected: healthy=True, 81 passive fingerprint signatures
+s1shell audit verify    # expected: Audit Log Integrity: VALID
 ```
+
+> If `doctor` shows `WARN` on `anthropic_api_key`, check that `.env` uses a standard `sk-ant-api*` inference key rather than an `sk-ant-admin*` admin key (or switch to local `ollama` via `s1shell ai env --provider ollama`).
 
 ### 1.5 Optional Integrations (Custom Signatures & Read-Only MCP Server)
 
@@ -201,7 +216,29 @@ Add to your MCP client configuration:
 
 ## Part 2: Pentesting & Assessment Guide (Example: `https://www.target.com`)
 
-This walkthrough shows how to use S1shell across a full authorized web & AppSec engagement targeting **`https://www.target.com`**.
+This walkthrough shows how to use S1shell step-by-step across an authorized web & AppSec engagement targeting **`https://www.target.com`**.
+
+### Quick 4-Command Flow (TL;DR)
+
+Every authorized target assessment follows the same 4 steps: **Add Scope → Verify Scope → Assess → Remediate**:
+
+```bash
+# 1. Authorize the target in ~/.s1shell/scope.yaml (required before any target packet is sent)
+s1shell scope add target.com --include-subdomains \
+  --owner "Target Corp" --ref "SOW-2026-014" --expires 2026-12-31
+
+# 2. Verify DNS & scope match (expected output: [IN SCOPE])
+s1shell scope check https://www.target.com
+
+# 3. Run the read-only assessment and save HTML/MD/SARIF/JSON reports
+s1shell assess https://www.target.com --authorized \
+  --enrich-cve --intel --well-known --check-methods \
+  --operator "Jane Doe" --out-dir ./results/target-com
+
+# 4. Generate offline copy-paste hardening configs and inspect the HTML report
+s1shell remediate ./results/target-com/assess.json --stack auto --out ./results/target-com/hardening.md
+# Open ./results/target-com/report.html in your browser
+```
 
 ### Command Modes at a Glance
 
@@ -209,6 +246,8 @@ This walkthrough shows how to use S1shell across a full authorized web & AppSec 
 |---|---|---|
 | **Zero-Target-Contact (Passive / Offline)** | No — never sends packets to `target.com` | `intel ct\|rdap\|lookup\|advisory`, `cve search\|get\|audit`, `codec decode\|encode\|inspect\|hash`, `fingerprint --from-profile`, `remediate`, `diff`, `report build`, `audit` |
 | **Authorized Target Mode (Read-Only)** | **Yes** — must match `scope.yaml` + `--authorized` | `assess <target \| --targets-file>`, `profile <target>`, `fingerprint <target>` |
+
+> **Tip:** Want to try S1shell safely offline without touching an external domain? Add `127.0.0.1` to scope (`s1shell scope add 127.0.0.1 --owner "Lab" --ref "LAB-1" --expires 2027-12-31`) and run `s1shell assess http://127.0.0.1:<port> --authorized --skip-cve --out-dir ./results/lab` against any local test server.
 
 ---
 
@@ -514,6 +553,7 @@ s1shell audit verify
 
 | Symptom / Exit Code | Cause | Fix |
 |---|---|---|
+| `command not found: s1shell` | CLI not installed via `pipx` yet or shell command cache is stale | Run `pipx install --editable --force .` (or `./scripts/install-kali.sh`), ensure `~/.local/bin` is in `$PATH`, then run `rehash` (`zsh`) / `hash -r` (`bash`). Fallback: `PYTHONPATH=src python3 -m s1shell ...` |
 | `exit 2` (`OutOfScopeError`) | Target is not in `scope.yaml`, expired, excluded, or resolves to an un-scoped private/loopback/CGNAT/NAT64/metadata IP | Run `s1shell scope list` and `s1shell scope check https://www.target.com`, then add/renew via `s1shell scope add ... --replace` |
 | `exit 3` (`UnauthorizedError`) | Running a target command non-interactively without confirmation | Pass `--authorized` explicitly |
 | `exit 4` (`PolicyGateError`) | Findings breached `--fail-on`, `--min-score`, or `--fail-on-regression` | Expected CI/CD gate failure — review findings or adjust thresholds / `--ignore-finding <ID>` |
