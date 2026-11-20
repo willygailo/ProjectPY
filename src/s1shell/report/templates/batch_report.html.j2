@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>S1shell Batch Assessment Dashboard</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --ok: #4ade80;
+      --warn: #fbbf24;
+      --bad: #f87171;
+      --crit: #fb7185;
+    }
+    body {
+      font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      margin: 0;
+      padding: 2rem;
+      line-height: 1.5;
+    }
+    .container { max-width: 1120px; margin: 0 auto; }
+    h1, h2 { color: #f8fafc; }
+    .banner {
+      background: #082f49;
+      border-left: 4px solid var(--accent);
+      padding: 0.75rem 1rem;
+      margin-bottom: 1.5rem;
+      font-size: 0.9rem;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1.25rem;
+      margin-bottom: 1.25rem;
+    }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 0.75rem;
+    }
+    .stat {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.75rem;
+    }
+    .stat-label { color: var(--muted); font-size: 0.75rem; text-transform: uppercase; }
+    .stat-value { font-size: 1.3rem; font-weight: 700; color: #f8fafc; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 0.75rem;
+      font-size: 0.88rem;
+    }
+    th, td {
+      text-align: left;
+      padding: 0.5rem 0.65rem;
+      border-bottom: 1px solid var(--border);
+    }
+    th { color: var(--muted); font-weight: 600; }
+    .badge {
+      display: inline-block;
+      padding: 0.15rem 0.5rem;
+      border-radius: 999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .ok, .LOW, .MINIMAL { background: #14532d; color: var(--ok); }
+    .MODERATE, .MEDIUM { background: #78350f; color: var(--warn); }
+    .HIGH, .error { background: #7f1d1d; color: var(--bad); }
+    .CRITICAL { background: #881337; color: var(--crit); }
+    .blocked_out_of_scope, .blocked_unauthorized { background: #334155; color: #cbd5e1; }
+    code {
+      background: #0f172a;
+      padding: 0.1rem 0.35rem;
+      border-radius: 4px;
+      font-size: 0.85em;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>S1shell Authorized Batch Assessment Report</h1>
+    <div class="banner">
+      Operator: <strong>{{ operator }}</strong> &mdash;
+      Generated: <code>{{ batch.generated_at_utc }}</code> &mdash;
+      S1shell <code>{{ batch.tool_version }}</code>
+    </div>
+
+    <div class="card">
+      <h2>Portfolio Posture Summary</h2>
+      <div class="stats">
+        <div class="stat"><div class="stat-label">Total Targets</div><div class="stat-value">{{ batch.targets_total }}</div></div>
+        <div class="stat"><div class="stat-label">Assessed OK</div><div class="stat-value">{{ batch.succeeded }}</div></div>
+        <div class="stat"><div class="stat-label">Blocked (Scope/Auth)</div><div class="stat-value">{{ batch.blocked }}</div></div>
+        <div class="stat"><div class="stat-label">Errors</div><div class="stat-value">{{ batch.errored }}</div></div>
+        <div class="stat"><div class="stat-label">Average Score</div><div class="stat-value">{{ batch.average_score if batch.average_score is not none else "—" }}</div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Target Breakdown</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Target</th>
+            <th>Status</th>
+            <th>Score</th>
+            <th>Grade</th>
+            <th>Risk</th>
+            <th>Highest Sev</th>
+            <th>Findings</th>
+            <th>CVEs</th>
+            <th>Notes / Error</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for item in batch.results %}
+          <tr>
+            <td><code>{{ item.target }}</code></td>
+            <td><span class="badge {{ item.status }}">{{ item.status }}</span></td>
+            <td>{{ item.score if item.score is not none else "—" }}</td>
+            <td><strong>{{ item.grade or "—" }}</strong></td>
+            <td>{% if item.risk_level %}<span class="badge {{ item.risk_level }}">{{ item.risk_level }}</span>{% else %}—{% endif %}</td>
+            <td>{% if item.highest_severity %}<span class="badge {{ item.highest_severity }}">{{ item.highest_severity }}</span>{% else %}—{% endif %}</td>
+            <td>{{ item.finding_count }}</td>
+            <td>{{ item.cve_count }}</td>
+            <td>{{ item.error or "—" }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</body>
+</html>

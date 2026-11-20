@@ -131,6 +131,12 @@ class ReportService:
             scope_manager=self.scope_manager,
         )
 
+    def render_batch_html(self, batch: object, *, operator: str | None = None) -> str:
+        """Render a self-contained autoescaped HTML dashboard for a batch assessment."""
+        resolved_operator = (operator or getpass.getuser() or "unknown").strip() or "unknown"
+        template = self._html_env.get_template("batch_report.html.j2")
+        return template.render(batch=batch, operator=resolved_operator)
+
     def render(self, bundle: ReportBundle, *, fmt: str) -> str:
         """Render a ReportBundle in `json`, `md`, `html`, or `sarif` format."""
         norm_fmt = fmt.lower()

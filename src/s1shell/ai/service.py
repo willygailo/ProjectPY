@@ -140,17 +140,11 @@ class AIService:
             raise ValidationError("--model cannot be empty.")
         if clean_prov is not None and clean_prov not in SUPPORTED_AI_PROVIDERS:
             raise ValidationError(
-                f"Unsupported AI provider '{provider}'. "
-                f"Choose {', '.join(SUPPORTED_AI_PROVIDERS)}."
+                f"Unsupported AI provider '{provider}'. Choose {', '.join(SUPPORTED_AI_PROVIDERS)}."
             )
         if base_url is not None and not clean_url:
             raise ValidationError("--base-url cannot be empty.")
-        if (
-            clean_key is None
-            and clean_model is None
-            and clean_prov is None
-            and clean_url is None
-        ):
+        if clean_key is None and clean_model is None and clean_prov is None and clean_url is None:
             raise ValidationError(
                 "Provide --set-key, --model, --provider, and/or --base-url to update `.env`."
             )
@@ -193,14 +187,12 @@ class AIService:
             else:
                 key_type = "standard" if saved_key else "unset"
             configured = True if active_prov == "ollama" else bool(saved_key)
-            saved_model = (
-                existing.get(_PROVIDER_MODEL_VARS[active_prov], "").strip()
-                or self._cfg.get_ai_model(active_prov)
-            )
-            saved_url = (
-                existing.get("S1SHELL_AI_BASE_URL", "").strip()
-                or self._cfg.get_ai_base_url(active_prov)
-            )
+            saved_model = existing.get(
+                _PROVIDER_MODEL_VARS[active_prov], ""
+            ).strip() or self._cfg.get_ai_model(active_prov)
+            saved_url = existing.get(
+                "S1SHELL_AI_BASE_URL", ""
+            ).strip() or self._cfg.get_ai_base_url(active_prov)
             return AIEnvStatus(
                 configured=configured,
                 masked_key=mask_api_key(saved_key) if saved_key else None,
@@ -282,9 +274,7 @@ class AIService:
         full_prompt = "\n\n".join(prompt_parts)
 
         chosen_model = (
-            model.strip()
-            if model and model.strip()
-            else self._cfg.get_ai_model(active_prov)
+            model.strip() if model and model.strip() else self._cfg.get_ai_model(active_prov)
         )
         started = time.monotonic()
 

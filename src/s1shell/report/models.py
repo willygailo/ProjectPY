@@ -30,6 +30,7 @@ class ReportBundle:
     posture: dict[str, Any] | None = None
     findings: list[dict[str, Any]] = field(default_factory=list)
     ai_analysis: dict[str, Any] | None = None
+    remediation_snippets: list[dict[str, Any]] = field(default_factory=list)
     schema_version: str = SCHEMA_VERSION
     tool_version: str = __version__
     generated_at_utc: str = field(default_factory=utc_now_iso)

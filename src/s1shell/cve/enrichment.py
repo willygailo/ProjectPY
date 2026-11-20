@@ -11,7 +11,7 @@ import httpx
 
 from s1shell.config import RuntimeConfig
 from s1shell.cve.cache import CVECache
-from s1shell.cve.models import CVERecord
+from s1shell.cve.models import CVERecord, compute_cve_priority
 from s1shell.errors import NetworkError
 from s1shell.http import build_intel_client
 
@@ -160,13 +160,20 @@ def enrich_records(
         cid = rec.cve_id.upper()
         kev_entry = kev_map.get(cid)
         epss_pair = epss_map.get(cid)
+        in_kev = kev_entry is not None
+        epss_val = epss_pair[0] if epss_pair else rec.epss_score
         enriched.append(
             replace(
                 rec,
-                in_kev=kev_entry is not None,
+                in_kev=in_kev,
                 kev_due_date=(kev_entry.get("due_date") or None) if kev_entry else None,
-                epss_score=epss_pair[0] if epss_pair else rec.epss_score,
+                epss_score=epss_val,
                 epss_percentile=epss_pair[1] if epss_pair else rec.epss_percentile,
+                priority=compute_cve_priority(
+                    in_kev=in_kev,
+                    epss_score=epss_val,
+                    cvss_score=rec.cvss.base_score if rec.cvss else None,
+                ),
             )
         )
     return enriched

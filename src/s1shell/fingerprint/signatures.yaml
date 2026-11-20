@@ -650,3 +650,253 @@ signatures:
     headers:
       - name: "x-gitlab-meta"
         pattern: ".+"
+
+  # --- Enterprise WAFs, Gateways, Cloud & DevOps Platforms ---
+  - vendor: "Citrix"
+    product: "Citrix NetScaler / ADC"
+    category: "waf"
+    confidence: "high"
+    cpe_vendor: "citrix"
+    cpe_product: "netscaler_application_delivery_controller"
+    cookie_patterns:
+      - "^NSC_"
+    headers:
+      - name: "via"
+        pattern: "(?i)NS-CACHE"
+
+  - vendor: "Fortinet"
+    product: "FortiWeb WAF"
+    category: "waf"
+    confidence: "high"
+    cpe_vendor: "fortinet"
+    cpe_product: "fortiweb"
+    cookie_patterns:
+      - "^FORTIWAFSID$"
+    headers:
+      - name: "server"
+        pattern: "(?i)^FortiWeb"
+
+  - vendor: "OWASP / Trustwave"
+    product: "ModSecurity"
+    category: "waf"
+    confidence: "medium"
+    cpe_vendor: "trustwave"
+    cpe_product: "modsecurity"
+    headers:
+      - name: "server"
+        pattern: "(?i)mod_security|ModSecurity"
+
+  - vendor: "Palo Alto Networks"
+    product: "PAN-OS / GlobalProtect"
+    category: "waf"
+    confidence: "high"
+    cpe_vendor: "paloaltonetworks"
+    cpe_product: "pan-os"
+    headers:
+      - name: "server"
+        pattern: "(?i)^PanWeb\\s+Server"
+    cookies:
+      - "PHPSESSID_GP"
+
+  - vendor: "Microsoft Azure"
+    product: "Azure App Service"
+    category: "cdn"
+    confidence: "high"
+    headers:
+      - name: "x-azure-application-gateway"
+        pattern: ".+"
+    cookies:
+      - "ARRAffinity"
+      - "ARRAffinitySameSite"
+    cnames:
+      - "(?i)\\.azurewebsites\\.net$"
+
+  - vendor: "Atlassian"
+    product: "Atlassian Jira"
+    category: "framework"
+    confidence: "high"
+    cpe_vendor: "atlassian"
+    cpe_product: "jira"
+    headers:
+      - name: "x-ausername"
+        pattern: ".+"
+      - name: "x-arequestid"
+        pattern: ".+"
+    cookies:
+      - "atlassian.xsrf.token"
+
+  - vendor: "Atlassian"
+    product: "Atlassian Confluence"
+    category: "framework"
+    confidence: "high"
+    cpe_vendor: "atlassian"
+    cpe_product: "confluence_server"
+    headers:
+      - name: "x-confluence-request-time"
+        pattern: ".+"
+
+  - vendor: "Red Hat / CNCF"
+    product: "Keycloak"
+    category: "framework"
+    confidence: "high"
+    cpe_vendor: "redhat"
+    cpe_product: "keycloak"
+    cookies:
+      - "KEYCLOAK_SESSION"
+      - "KC_RESTART"
+
+  - vendor: "SonarSource"
+    product: "SonarQube"
+    category: "framework"
+    confidence: "high"
+    cpe_vendor: "sonarsource"
+    cpe_product: "sonarqube"
+    headers:
+      - name: "sonar-version"
+        pattern: "([\\d.]+)"
+
+  - vendor: "Elastic"
+    product: "Kibana"
+    category: "framework"
+    confidence: "high"
+    cpe_vendor: "elastic"
+    cpe_product: "kibana"
+    headers:
+      - name: "kbn-name"
+        pattern: ".+"
+      - name: "kbn-version"
+        pattern: "([\\d.]+)"
+
+  - vendor: "MinIO"
+    product: "MinIO Object Storage"
+    category: "web_server"
+    confidence: "high"
+    cpe_vendor: "minio"
+    cpe_product: "minio"
+    headers:
+      - name: "server"
+        pattern: "(?i)^MinIO"
+
+  - vendor: "Squid Cache"
+    product: "Squid Proxy"
+    category: "web_server"
+    confidence: "high"
+    cpe_vendor: "squid-cache"
+    cpe_product: "squid"
+    headers:
+      - name: "server"
+        pattern: "(?i)^squid(?:/([\\d.]+))?"
+      - name: "via"
+        pattern: "(?i)\\bsquid(?:/([\\d.]+))?"
+
+  - vendor: "Svelte"
+    product: "SvelteKit"
+    category: "framework"
+    confidence: "medium"
+    cpe_vendor: "svelte"
+    cpe_product: "sveltekit"
+    html_hints:
+      - "sveltekit"
+
+  - vendor: "Astro"
+    product: "Astro"
+    category: "framework"
+    confidence: "medium"
+    meta_generator_pattern: "(?i)Astro\\s+v?([\\d.]+)"
+    html_hints:
+      - "astro"
+
+  - vendor: "Open Source Matters"
+    product: "Joomla"
+    category: "framework"
+    confidence: "high"
+    cpe_vendor: "joomla"
+    cpe_product: "joomla\\!"
+    meta_generator_pattern: "(?i)Joomla!(?:\\s+([\\d.]+))?"
+
+  - vendor: "Adobe"
+    product: "Magento"
+    category: "framework"
+    confidence: "medium"
+    cpe_vendor: "magento"
+    cpe_product: "magento"
+    headers:
+      - name: "x-magento-cache-debug"
+        pattern: ".+"
+      - name: "x-magento-tags"
+        pattern: ".+"
+
+  # --- Passive Client-Side JS Libraries (zero extra packets -> CPE correlation) ---
+  - vendor: "OpenJS Foundation"
+    product: "jQuery"
+    category: "client_library"
+    confidence: "high"
+    cpe_vendor: "jquery"
+    cpe_product: "jquery"
+    html_libraries:
+      - "jquery"
+
+  - vendor: "Bootstrap"
+    product: "Bootstrap"
+    category: "client_library"
+    confidence: "high"
+    cpe_vendor: "getbootstrap"
+    cpe_product: "bootstrap"
+    html_libraries:
+      - "bootstrap"
+
+  - vendor: "OpenJS Foundation"
+    product: "Lodash"
+    category: "client_library"
+    confidence: "high"
+    cpe_vendor: "lodash"
+    cpe_product: "lodash"
+    html_libraries:
+      - "lodash"
+
+  - vendor: "Moment.js"
+    product: "Moment.js"
+    category: "client_library"
+    confidence: "high"
+    cpe_vendor: "momentjs"
+    cpe_product: "moment"
+    html_libraries:
+      - "moment"
+
+  - vendor: "Cure53"
+    product: "DOMPurify"
+    category: "client_library"
+    confidence: "high"
+    cpe_vendor: "cure53"
+    cpe_product: "dompurify"
+    html_libraries:
+      - "dompurify"
+
+  - vendor: "Handlebars"
+    product: "Handlebars.js"
+    category: "client_library"
+    confidence: "high"
+    cpe_vendor: "handlebarsjs"
+    cpe_product: "handlebars"
+    html_libraries:
+      - "handlebars"
+
+  - vendor: "Axios"
+    product: "Axios"
+    category: "client_library"
+    confidence: "high"
+    cpe_vendor: "axios"
+    cpe_product: "axios"
+    html_libraries:
+      - "axios"
+
+  - vendor: "SmartBear"
+    product: "Swagger UI"
+    category: "client_library"
+    confidence: "high"
+    cpe_vendor: "smartbear"
+    cpe_product: "swagger-ui"
+    html_hints:
+      - "swagger-ui"
+    html_libraries:
+      - "swagger-ui"

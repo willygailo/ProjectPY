@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import base64
 import contextlib
+import hashlib
 import socket
 import ssl
 import warnings
@@ -10,11 +12,14 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import dsa, ec, ed448, ed25519, rsa
-from cryptography.x509.oid import ExtensionOID
+from cryptography.x509.oid import ExtensionOID, ObjectIdentifier
 
 from s1shell.errors import NetworkError
 from s1shell.profile.models import TLSResult
+
+_TLS_FEATURE_OID = ObjectIdentifier("1.3.6.1.5.5.7.1.24")
 
 
 @dataclass(frozen=True)
@@ -32,6 +37,10 @@ class _ParsedX509:
     has_wildcard_san: bool = False
     cert_validity_days: int | None = None
     has_sct: bool | None = None
+    has_must_staple: bool | None = None
+    serial_number: str | None = None
+    sha256_fingerprint: str | None = None
+    spki_sha256: str | None = None
 
 
 def analyze_cipher_suite(
@@ -87,7 +96,7 @@ def _extract_public_key_info(cert: x509.Certificate) -> tuple[str | None, int | 
 
 
 def _parse_x509_der(der_bytes: bytes) -> _ParsedX509:
-    """Parse DER-encoded X.509 certificate metadata using cryptography."""
+    """Parse DER-encoded X.509 certificate metadata, SHA-256 fingerprint, and SPKI pin."""
     cert = x509.load_der_x509_certificate(der_bytes)
     sans: list[str] = []
     has_wildcard = False
@@ -114,6 +123,15 @@ def _parse_x509_der(der_bytes: bytes) -> _ParsedX509:
     except x509.ExtensionNotFound:
         has_sct = False
 
+    has_must_staple = False
+    try:
+        tls_feat_ext = cert.extensions.get_extension_for_oid(_TLS_FEATURE_OID)
+        feat_val = tls_feat_ext.value
+        if isinstance(feat_val, x509.TLSFeature):
+            has_must_staple = any(f == x509.TLSFeatureType.status_request for f in feat_val)
+    except x509.ExtensionNotFound:
+        has_must_staple = False
+
     not_before = cert.not_valid_before_utc
     not_after = cert.not_valid_after_utc
     now = datetime.now(timezone.utc)
@@ -126,6 +144,14 @@ def _parse_x509_der(der_bytes: bytes) -> _ParsedX509:
     subject_str = cert.subject.rfc4514_string()
     issuer_str = cert.issuer.rfc4514_string()
     is_self_signed = subject_str == issuer_str
+
+    sha256_fp = cert.fingerprint(hashes.SHA256()).hex()
+    spki_der = cert.public_key().public_bytes(
+        serialization.Encoding.DER,
+        serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
+    spki_pin = base64.b64encode(hashlib.sha256(spki_der).digest()).decode("ascii")
+    serial_hex = format(cert.serial_number, "x")
 
     return _ParsedX509(
         subject=subject_str,
@@ -141,6 +167,10 @@ def _parse_x509_der(der_bytes: bytes) -> _ParsedX509:
         has_wildcard_san=has_wildcard,
         cert_validity_days=validity_days,
         has_sct=has_sct,
+        has_must_staple=has_must_staple,
+        serial_number=serial_hex,
+        sha256_fingerprint=sha256_fp,
+        spki_sha256=spki_pin,
     )
 
 
@@ -328,6 +358,10 @@ def inspect_tls(
         has_wildcard_san=cert_meta.has_wildcard_san,
         cert_validity_days=cert_meta.cert_validity_days,
         has_sct=cert_meta.has_sct,
+        has_must_staple=cert_meta.has_must_staple,
+        serial_number=cert_meta.serial_number,
+        sha256_fingerprint=cert_meta.sha256_fingerprint,
+        spki_sha256=cert_meta.spki_sha256,
         cipher_weaknesses=cipher_weaknesses,
         client_blocked_versions=client_blocked,
     )

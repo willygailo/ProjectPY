@@ -16,12 +16,19 @@ class DNSRecords:
     aaaa: list[str] = field(default_factory=list)
     cname: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    mx: list[str] = field(default_factory=list)
+    ns: list[str] = field(default_factory=list)
     caa: list[str] = field(default_factory=list)
     txt: list[str] = field(default_factory=list)
     spf: str | None = None
+    spf_lookup_count: int | None = None
     dmarc: str | None = None
+    dmarc_policy: str | None = None
+    mta_sts: str | None = None
+    tls_rpt: str | None = None
     dnssec_present: bool | None = None
     dangling_cnames: list[str] = field(default_factory=list)
+    apex_domain: str | None = None
     security_checked: bool = False
     security_errors: list[str] = field(default_factory=list)
 
@@ -49,6 +56,10 @@ class TLSResult:
     has_wildcard_san: bool = False
     cert_validity_days: int | None = None
     has_sct: bool | None = None
+    has_must_staple: bool | None = None
+    serial_number: str | None = None
+    sha256_fingerprint: str | None = None
+    spki_sha256: str | None = None
     cipher_weaknesses: list[str] = field(default_factory=list)
     client_blocked_versions: list[str] = field(default_factory=list)
 
@@ -64,6 +75,9 @@ class ProtocolInfo:
     alt_svc: str | None = None
     redirect_location: str | None = None
     body_truncated: bool = False
+    methods_checked: bool = False
+    allowed_methods: list[str] = field(default_factory=list)
+    risky_methods: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -102,7 +116,7 @@ class CookieFinding:
 
 @dataclass(frozen=True)
 class HeaderAnalysis:
-    """Aggregated HTTP security header, banner, cookie, CSP, and CORS findings."""
+    """Aggregated HTTP security header, banner, cookie, CSP, CORS, and cache findings."""
 
     security_headers: list[HeaderFinding] = field(default_factory=list)
     banner_disclosures: list[BannerDisclosure] = field(default_factory=list)
@@ -110,6 +124,9 @@ class HeaderAnalysis:
     csp_directives: dict[str, list[str]] = field(default_factory=dict)
     csp_report_only: str | None = None
     cors_issues: list[str] = field(default_factory=list)
+    cache_control: str | None = None
+    cache_issues: list[str] = field(default_factory=list)
+    debug_headers: list[BannerDisclosure] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -126,6 +143,9 @@ class HTMLPassiveAnalysis:
     insecure_forms: list[str] = field(default_factory=list)
     detected_libraries: list[str] = field(default_factory=list)
     framework_hints: list[str] = field(default_factory=list)
+    third_party_origins: list[str] = field(default_factory=list)
+    inline_script_count: int = 0
+    unsafe_blank_links: int = 0
 
 
 @dataclass(frozen=True)
@@ -137,10 +157,15 @@ class WellKnownCheck:
     security_txt_contacts: list[str] = field(default_factory=list)
     security_txt_expires: str | None = None
     security_txt_expired: bool = False
+    security_txt_canonical: str | None = None
+    security_txt_encryption: str | None = None
+    security_txt_policy: str | None = None
+    security_txt_over_http: bool = False
     robots_txt_present: bool = False
     robots_txt_status: int | None = None
     robots_disallow_count: int = 0
     robots_sensitive_hints: list[str] = field(default_factory=list)
+    robots_sitemaps: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

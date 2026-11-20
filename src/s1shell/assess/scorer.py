@@ -1,11 +1,16 @@
-"""Category-capped posture scoring, compliance mapping, and CI policy gate evaluation."""
+"""Category-capped posture scoring, presets, compliance mapping, and CI policy gates."""
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from s1shell.assess.models import AssessmentFinding, PostureScore
 from s1shell.cve.models import CVESearchResult
+from s1shell.errors import ValidationError
 from s1shell.fingerprint.models import FingerprintResult
 from s1shell.profile.models import ProfileResult
+
+SUPPORTED_PRESETS = ("web", "api", "strict")
 
 _SEVERITY_ORDER = {
     "CRITICAL": 0,
@@ -29,6 +34,7 @@ _DOMAIN_MAP = {
     "transport": "tls_transport",
     "tls": "tls_transport",
     "headers": "headers",
+    "methods": "headers",
     "cookies": "cookies_cors",
     "cors": "cookies_cors",
     "dns": "dns_hygiene",
@@ -50,6 +56,45 @@ _DOMAIN_PENALTY_CAPS = {
 
 _DEPRECATED_TLS = {"TLSv1", "TLSv1.0", "TLSv1.1"}
 _WEAK_SIG_HASHES = {"md5", "sha1"}
+_HIGH_RISK_METHODS = {"TRACE", "TRACK", "CONNECT"}
+
+# Browser-only rules suppressed automatically under the `api` assessment preset.
+_API_EXCLUDED_IDS = {
+    "HDR-XFO",
+    "HDR-XFO-WEAK",
+    "HDR-XFO-CSP",
+    "HDR-PERM",
+    "HDR-COOP",
+    "HDR-COOP-WEAK",
+    "HDR-COEP",
+    "HDR-COEP-WEAK",
+}
+_API_EXCLUDED_CATEGORIES = {"html"}
+
+# High-assurance controls promoted from INFO -> LOW under the `strict` preset.
+_STRICT_PROMOTE_IDS = {
+    "TLS-009",
+    "DNS-002",
+    "DNS-005",
+    "HDR-COOP",
+    "HDR-CORP",
+    "HDR-COEP",
+}
+
+# Category -> default (OWASP Top 10:2021, NIST SP 800-53 Rev. 5) compliance mapping.
+_COMPLIANCE_BY_CATEGORY: dict[str, tuple[str, str]] = {
+    "transport": ("A02:2021", "SC-8"),
+    "tls": ("A02:2021", "SC-13"),
+    "headers": ("A05:2021", "SC-8"),
+    "methods": ("A05:2021", "CM-7"),
+    "cors": ("A01:2021", "AC-3"),
+    "cookies": ("A07:2021", "SC-23"),
+    "disclosure": ("A05:2021", "CM-6"),
+    "dns": ("A05:2021", "SC-20"),
+    "html": ("A05:2021", "SI-10"),
+    "well_known": ("A05:2021", "CM-6"),
+    "cve": ("A06:2021", "SI-2"),
+}
 
 # (id, severity, remediation, cwe, asvs)
 _HEADER_META: dict[str, tuple[str, str, str, str, str]] = {
@@ -122,6 +167,14 @@ _HEADER_META: dict[str, tuple[str, str, str, str, str]] = {
 }
 
 
+def highest_severity(findings: list[AssessmentFinding]) -> str | None:
+    """Return the highest severity present across `findings`, or None if empty."""
+    if not findings:
+        return None
+    best = min(findings, key=lambda f: _SEVERITY_ORDER.get(f.severity, 99))
+    return best.severity
+
+
 def _compute_grade(score: int, counts: dict[str, int]) -> str:
     if score >= 90:
         grade = "A"
@@ -168,14 +221,10 @@ def check_policy_gate(
         norm_sev = fail_on.strip().upper()
         threshold = _SEVERITY_ORDER.get(norm_sev)
         if threshold is not None:
-            breaching = [
-                f for f in findings if _SEVERITY_ORDER.get(f.severity, 99) <= threshold
-            ]
+            breaching = [f for f in findings if _SEVERITY_ORDER.get(f.severity, 99) <= threshold]
             if breaching:
                 ids = ", ".join(f.id for f in breaching[:5])
-                reasons.append(
-                    f"Found {len(breaching)} finding(s) at or above {norm_sev} ({ids})"
-                )
+                reasons.append(f"Found {len(breaching)} finding(s) at or above {norm_sev} ({ids})")
     if min_score is not None and posture.score < min_score:
         reasons.append(
             f"Posture score {posture.score}/100 (Grade {posture.grade}) is below "
@@ -184,20 +233,46 @@ def check_policy_gate(
     return "; ".join(reasons) if reasons else None
 
 
-def evaluate_posture(
+def _attach_compliance(finding: AssessmentFinding) -> AssessmentFinding:
+    owasp_def, nist_def = _COMPLIANCE_BY_CATEGORY.get(finding.category, ("A05:2021", "CM-6"))
+    if finding.id == "HDR-CACHE":
+        owasp_def, nist_def = "A01:2021", "SC-28"
+    elif finding.id == "HTML-002":
+        owasp_def, nist_def = "A08:2021", "SI-7"
+    elif finding.id in {"HTML-001", "HTML-003"}:
+        owasp_def, nist_def = "A02:2021", "SC-8"
+    elif finding.id == "DNS-001":
+        owasp_def, nist_def = "A05:2021", "CM-8"
+    return replace(
+        finding,
+        owasp=finding.owasp or owasp_def,
+        nist=finding.nist or nist_def,
+    )
+
+
+def evaluate_posture_with_suppressions(
     profile: ProfileResult,
     fingerprint: FingerprintResult,
     cve: CVESearchResult | None = None,
-) -> tuple[PostureScore, list[AssessmentFinding]]:
-    """Derive prioritized CWE/ASVS-mapped findings and a category-capped posture score."""
-    findings: list[AssessmentFinding] = []
+    *,
+    preset: str = "web",
+    ignore_findings: set[str] | None = None,
+) -> tuple[PostureScore, list[AssessmentFinding], list[AssessmentFinding]]:
+    """Derive findings, apply preset & waivers, and return `(posture, active, suppressed)`."""
+    norm_preset = preset.strip().lower()
+    if norm_preset not in SUPPORTED_PRESETS:
+        raise ValidationError(
+            f"Unsupported preset '{preset}'. Choose {', '.join(SUPPORTED_PRESETS)}."
+        )
+
+    raw_findings: list[AssessmentFinding] = []
     is_https = profile.url.lower().startswith("https://")
 
-    # 1. Transport & HTTP redirect posture
+    # 1. Transport & HTTP redirect posture (never follows redirects)
+    redir = profile.protocol.redirect_location
     if not is_https:
-        redir = profile.protocol.redirect_location
         if redir and redir.lower().startswith("https://"):
-            findings.append(
+            raw_findings.append(
                 AssessmentFinding(
                     id="TRANS-001",
                     severity="INFO",
@@ -212,7 +287,7 @@ def evaluate_posture(
                 )
             )
         else:
-            findings.append(
+            raw_findings.append(
                 AssessmentFinding(
                     id="TRANS-002",
                     severity="HIGH",
@@ -224,12 +299,47 @@ def evaluate_posture(
                     asvs="V9.1.1",
                 )
             )
+    elif redir and redir.lower().startswith("http://"):
+        raw_findings.append(
+            AssessmentFinding(
+                id="TRANS-003",
+                severity="HIGH",
+                category="transport",
+                title="HTTPS endpoint redirects to unencrypted HTTP",
+                evidence=f"HTTP {profile.protocol.status_code} -> {redir}",
+                remediation="Update redirect targets to use `https://` to prevent downgrade.",
+                cwe="CWE-319",
+                asvs="V9.1.1",
+            )
+        )
+
+    # 1b. Opt-in read-only HTTP OPTIONS method audit
+    if profile.protocol.methods_checked and profile.protocol.risky_methods:
+        has_high = any(m in _HIGH_RISK_METHODS for m in profile.protocol.risky_methods)
+        raw_findings.append(
+            AssessmentFinding(
+                id="METH-001",
+                severity="HIGH" if has_high else "MEDIUM",
+                category="methods",
+                title="Potentially risky HTTP methods advertised in OPTIONS response",
+                evidence=(
+                    f"Risky: {', '.join(profile.protocol.risky_methods)} "
+                    f"(Allow: {', '.join(profile.protocol.allowed_methods)})"
+                ),
+                remediation=(
+                    "Disable unused HTTP methods (TRACE/TRACK/WebDAV/PUT/DELETE) at the web "
+                    "server or API gateway unless explicitly required and authenticated."
+                ),
+                cwe="CWE-749",
+                asvs="V14.5.1",
+            )
+        )
 
     # 2. TLS, Cipher & X.509 certificate posture
     tls = profile.tls
     if tls is not None and tls.applicable:
         if not tls.verified:
-            findings.append(
+            raw_findings.append(
                 AssessmentFinding(
                     id="TLS-001",
                     severity="HIGH",
@@ -246,7 +356,7 @@ def evaluate_posture(
             )
         if tls.days_remaining is not None:
             if tls.days_remaining < 0:
-                findings.append(
+                raw_findings.append(
                     AssessmentFinding(
                         id="TLS-002",
                         severity="CRITICAL",
@@ -259,7 +369,7 @@ def evaluate_posture(
                     )
                 )
             elif tls.days_remaining <= 30:
-                findings.append(
+                raw_findings.append(
                     AssessmentFinding(
                         id="TLS-003",
                         severity="MEDIUM",
@@ -276,7 +386,7 @@ def evaluate_posture(
             observed_versions.append(tls.negotiated_version)
         deprecated = [v for v in observed_versions if v in _DEPRECATED_TLS]
         if deprecated:
-            findings.append(
+            raw_findings.append(
                 AssessmentFinding(
                     id="TLS-004",
                     severity="HIGH",
@@ -294,7 +404,7 @@ def evaluate_posture(
                 for w in tls.cipher_weaknesses
                 for tok in ("NULL", "EXPORT", "ANONYMOUS", "RC4", "3DES", "DES", "MD5")
             )
-            findings.append(
+            raw_findings.append(
                 AssessmentFinding(
                     id="TLS-005",
                     severity="HIGH" if severe else "MEDIUM",
@@ -310,20 +420,40 @@ def evaluate_posture(
                 )
             )
         if tls.key_type == "RSA" and tls.key_size is not None and tls.key_size < 2048:
-            findings.append(
+            raw_findings.append(
                 AssessmentFinding(
                     id="TLS-006",
                     severity="HIGH",
                     category="tls",
                     title="Weak RSA certificate key length",
                     evidence=f"Certificate uses RSA {tls.key_size}-bit key (< 2048 bits)",
-                    remediation="Re-issue the certificate with RSA >= 2048-bit or ECDSA P-256/P-384.",
+                    remediation=(
+                        "Re-issue the certificate with RSA >= 2048-bit or ECDSA P-256/P-384."
+                    ),
+                    cwe="CWE-326",
+                    asvs="V9.1.3",
+                )
+            )
+        elif (
+            tls.key_type
+            and tls.key_type.startswith("EC(")
+            and tls.key_size is not None
+            and tls.key_size < 224
+        ):
+            raw_findings.append(
+                AssessmentFinding(
+                    id="TLS-006",
+                    severity="HIGH",
+                    category="tls",
+                    title="Weak elliptic-curve certificate key length",
+                    evidence=f"Certificate uses {tls.key_type} ({tls.key_size}-bit < 224 bits)",
+                    remediation="Re-issue certificate using P-256 (secp256r1) or P-384.",
                     cwe="CWE-326",
                     asvs="V9.1.3",
                 )
             )
         if tls.signature_algorithm and tls.signature_algorithm.lower() in _WEAK_SIG_HASHES:
-            findings.append(
+            raw_findings.append(
                 AssessmentFinding(
                     id="TLS-007",
                     severity="HIGH",
@@ -336,33 +466,42 @@ def evaluate_posture(
                 )
             )
         if tls.cert_validity_days is not None and tls.cert_validity_days > 398:
-            findings.append(
+            raw_findings.append(
                 AssessmentFinding(
                     id="TLS-008",
                     severity="LOW",
                     category="tls",
                     title="TLS certificate validity exceeds 398-day industry limit",
                     evidence=f"Certificate lifetime is {tls.cert_validity_days} days",
-                    remediation="Issue shorter-lived certificates (<= 90–398 days) with ACME automation.",
+                    remediation=(
+                        "Issue shorter-lived certificates (<= 90-398 days) with ACME automation."
+                    ),
                     cwe="CWE-298",
                     asvs="V9.2.1",
                 )
             )
-        if tls.supported_versions and "TLSv1.3" not in tls.supported_versions and tls.negotiated_version != "TLSv1.3":
-            findings.append(
+        no_tls13 = (
+            bool(tls.supported_versions)
+            and "TLSv1.3" not in tls.supported_versions
+            and tls.negotiated_version != "TLSv1.3"
+        )
+        if no_tls13:
+            raw_findings.append(
                 AssessmentFinding(
                     id="TLS-009",
                     severity="INFO",
                     category="tls",
                     title="TLS 1.3 not negotiated or advertised",
                     evidence=f"Observed versions: {', '.join(tls.supported_versions)}",
-                    remediation="Enable TLS 1.3 alongside TLS 1.2 for improved security and latency.",
+                    remediation=(
+                        "Enable TLS 1.3 alongside TLS 1.2 for improved security and latency."
+                    ),
                     cwe="CWE-327",
                     asvs="V9.1.2",
                 )
             )
         if tls.client_blocked_versions:
-            findings.append(
+            raw_findings.append(
                 AssessmentFinding(
                     id="TLS-010",
                     severity="INFO",
@@ -378,7 +517,7 @@ def evaluate_posture(
                 )
             )
 
-    # 3. Security headers & directive-level CSP
+    # 3. Security headers, directive-level CSP & sensitive caching
     has_frame_ancestors = "frame-ancestors" in profile.headers.csp_directives
     for hdr in profile.headers.security_headers:
         if hdr.header == "Strict-Transport-Security" and not is_https:
@@ -390,14 +529,16 @@ def evaluate_posture(
 
         # Modern CSP frame-ancestors supersedes X-Frame-Options clickjacking defense.
         if hdr.header == "X-Frame-Options" and hdr.status == "missing" and has_frame_ancestors:
-            findings.append(
+            raw_findings.append(
                 AssessmentFinding(
                     id="HDR-XFO-CSP",
                     severity="INFO",
                     category="headers",
                     title="X-Frame-Options absent (covered by CSP frame-ancestors)",
                     evidence=hdr.note,
-                    remediation="Optionally add `X-Frame-Options` for legacy browser compatibility.",
+                    remediation=(
+                        "Optionally add `X-Frame-Options` for legacy browser compatibility."
+                    ),
                     cwe=cwe,
                     asvs=asvs,
                 )
@@ -407,7 +548,7 @@ def evaluate_posture(
         if hdr.header == "Content-Security-Policy" and hdr.status == "weak" and hdr.value:
             low_note = hdr.note.lower()
             if "'unsafe-inline'" in low_note or "'unsafe-eval'" in low_note:
-                findings.append(
+                raw_findings.append(
                     AssessmentFinding(
                         id="HDR-CSP-UNSAFE",
                         severity="MEDIUM",
@@ -422,7 +563,7 @@ def evaluate_posture(
                     )
                 )
             else:
-                findings.append(
+                raw_findings.append(
                     AssessmentFinding(
                         id="HDR-CSP-WEAK",
                         severity="LOW",
@@ -437,7 +578,7 @@ def evaluate_posture(
             continue
 
         if hdr.status == "missing":
-            findings.append(
+            raw_findings.append(
                 AssessmentFinding(
                     id=base_id,
                     severity=base_sev,
@@ -450,7 +591,7 @@ def evaluate_posture(
                 )
             )
         elif hdr.status == "weak":
-            findings.append(
+            raw_findings.append(
                 AssessmentFinding(
                     id=f"{base_id}-WEAK",
                     severity="LOW",
@@ -464,16 +605,38 @@ def evaluate_posture(
             )
 
     if profile.headers.csp_report_only and not profile.headers.csp_directives:
-        findings.append(
+        ro_val = profile.headers.csp_report_only[:120]
+        raw_findings.append(
             AssessmentFinding(
                 id="HDR-CSP-RO",
                 severity="INFO",
                 category="headers",
                 title="Content-Security-Policy is configured in Report-Only mode",
-                evidence=f"Content-Security-Policy-Report-Only: {profile.headers.csp_report_only[:120]}",
-                remediation="Review CSP violation reports and transition to enforced `Content-Security-Policy`.",
+                evidence=f"Content-Security-Policy-Report-Only: {ro_val}",
+                remediation=(
+                    "Review CSP violation reports and transition to enforced "
+                    "`Content-Security-Policy`."
+                ),
                 cwe="CWE-693",
                 asvs="V14.4.3",
+            )
+        )
+
+    if profile.headers.cache_issues:
+        is_public = any("public" in issue.lower() for issue in profile.headers.cache_issues)
+        raw_findings.append(
+            AssessmentFinding(
+                id="HDR-CACHE",
+                severity="MEDIUM" if is_public else "LOW",
+                category="headers",
+                title="Sensitive/session response lacks restrictive Cache-Control",
+                evidence="; ".join(profile.headers.cache_issues),
+                remediation=(
+                    "Set `Cache-Control: no-store, private` on authenticated and "
+                    "session-issuing responses."
+                ),
+                cwe="CWE-524",
+                asvs="V8.2.1",
             )
         )
 
@@ -493,7 +656,7 @@ def evaluate_posture(
     ]
     has_creds = "true" in acac_vals
     if "*" in acao_vals and has_creds:
-        findings.append(
+        raw_findings.append(
             AssessmentFinding(
                 id="CORS-001",
                 severity="HIGH",
@@ -511,7 +674,7 @@ def evaluate_posture(
             )
         )
     elif "*" in acao_vals:
-        findings.append(
+        raw_findings.append(
             AssessmentFinding(
                 id="CORS-002",
                 severity="LOW",
@@ -527,21 +690,23 @@ def evaluate_posture(
             )
         )
     if any(v.lower() == "null" for v in acao_vals):
-        findings.append(
+        raw_findings.append(
             AssessmentFinding(
                 id="CORS-003",
                 severity="HIGH",
                 category="cors",
                 title="CORS trusts 'null' origin",
                 evidence="Access-Control-Allow-Origin: null",
-                remediation="Remove 'null' from trusted CORS origins to prevent sandboxed-iframe bypasses.",
+                remediation=(
+                    "Remove 'null' from trusted CORS origins to prevent sandboxed-iframe bypasses."
+                ),
                 cwe="CWE-942",
                 asvs="V14.5.3",
             )
         )
     specific_acao = [v for v in acao_vals if v != "*" and v.lower() != "null"]
     if specific_acao and not any("origin" in v for v in vary_vals):
-        findings.append(
+        raw_findings.append(
             AssessmentFinding(
                 id="CORS-004",
                 severity="INFO",
@@ -557,7 +722,7 @@ def evaluate_posture(
     # 5. Cookie security attributes (differentiating session-like vs non-session cookies)
     for cookie in profile.headers.cookies:
         if not cookie.secure:
-            findings.append(
+            raw_findings.append(
                 AssessmentFinding(
                     id=f"COOKIE-SEC-{cookie.name}",
                     severity="MEDIUM" if (cookie.is_session_like or is_https) else "LOW",
@@ -570,7 +735,7 @@ def evaluate_posture(
                 )
             )
         if not cookie.http_only:
-            findings.append(
+            raw_findings.append(
                 AssessmentFinding(
                     id=f"COOKIE-HTTPONLY-{cookie.name}",
                     severity="LOW" if cookie.is_session_like else "INFO",
@@ -585,7 +750,7 @@ def evaluate_posture(
                 )
             )
         if not cookie.same_site:
-            findings.append(
+            raw_findings.append(
                 AssessmentFinding(
                     id=f"COOKIE-SAMESITE-{cookie.name}",
                     severity="LOW" if cookie.is_session_like else "INFO",
@@ -598,12 +763,12 @@ def evaluate_posture(
                 )
             )
         if cookie.prefix_issues:
-            findings.append(
+            raw_findings.append(
                 AssessmentFinding(
                     id=f"COOKIE-PREFIX-{cookie.name}",
                     severity="MEDIUM",
                     category="cookies",
-                    title=f"Cookie '{cookie.name}' violates prefix or SameSite=None security rules",
+                    title=f"Cookie '{cookie.name}' violates prefix or SameSite=None rules",
                     evidence="; ".join(cookie.prefix_issues),
                     remediation=(
                         "Enforce `Secure` on `SameSite=None`/`__Secure-` cookies and "
@@ -613,12 +778,52 @@ def evaluate_posture(
                     asvs="V3.4.4",
                 )
             )
+        if cookie.is_session_like:
+            scope_issues: list[str] = []
+            if cookie.domain and cookie.domain.startswith("."):
+                scope_issues.append(f"broad wildcard Domain={cookie.domain}")
+            if cookie.max_age is not None and cookie.max_age > 30 * 86400:
+                days = cookie.max_age // 86400
+                scope_issues.append(f"long Max-Age={days}d (>30d)")
+            if scope_issues:
+                raw_findings.append(
+                    AssessmentFinding(
+                        id=f"COOKIE-SCOPE-{cookie.name}",
+                        severity="LOW",
+                        category="cookies",
+                        title=f"Session cookie '{cookie.name}' has broad scope or lifetime",
+                        evidence="; ".join(scope_issues),
+                        remediation=(
+                            "Omit wildcard `Domain` attributes on session cookies (host-only) "
+                            "and shorten session `Max-Age`."
+                        ),
+                        cwe="CWE-384",
+                        asvs="V3.2.1",
+                    )
+                )
 
-    # 6. Banner disclosures
+    # 6. Banner & Debug header disclosures
+    for dbg in profile.headers.debug_headers:
+        raw_findings.append(
+            AssessmentFinding(
+                id=f"DISC-DBG-{dbg.header.upper()}",
+                severity="MEDIUM",
+                category="disclosure",
+                title=f"Debug/profiler header '{dbg.header}' exposed in production response",
+                evidence=f"{dbg.header}: {dbg.value}",
+                remediation=(
+                    f"Disable framework debug/profiler modes in production and strip "
+                    f"`{dbg.header}`."
+                ),
+                cwe="CWE-215",
+                asvs="V14.3.3",
+            )
+        )
+
     for banner in profile.headers.banner_disclosures:
         has_version = any(ch.isdigit() for ch in banner.value)
         if has_version:
-            findings.append(
+            raw_findings.append(
                 AssessmentFinding(
                     id=f"DISC-VER-{banner.header.upper()}",
                     severity="LOW",
@@ -633,7 +838,7 @@ def evaluate_posture(
                 )
             )
         else:
-            findings.append(
+            raw_findings.append(
                 AssessmentFinding(
                     id=f"DISC-BANNER-{banner.header.upper()}",
                     severity="INFO",
@@ -652,7 +857,7 @@ def evaluate_posture(
     dns = profile.dns
     if dns.security_checked:
         if dns.dangling_cnames:
-            findings.append(
+            raw_findings.append(
                 AssessmentFinding(
                     id="DNS-001",
                     severity="HIGH",
@@ -668,67 +873,123 @@ def evaluate_posture(
                 )
             )
         if not dns.caa:
-            findings.append(
+            raw_findings.append(
                 AssessmentFinding(
                     id="DNS-002",
                     severity="INFO",
                     category="dns",
                     title="No DNS CAA record found",
-                    evidence="CAA query returned no records for target hostname",
-                    remediation="Publish DNS `CAA` records restricting authorized Certificate Authorities.",
+                    evidence="CAA query returned no records for target hostname or apex",
+                    remediation=(
+                        "Publish DNS `CAA` records restricting authorized Certificate Authorities."
+                    ),
                     cwe="CWE-295",
                     asvs="V9.2.1",
                 )
             )
-        if dns.spf and "+all" in dns.spf.lower():
-            findings.append(
-                AssessmentFinding(
-                    id="DNS-003",
-                    severity="MEDIUM",
-                    category="dns",
-                    title="Permissive SPF policy uses `+all`",
-                    evidence=f"SPF: {dns.spf[:140]}",
-                    remediation="Replace `+all` with `-all` (hardfail) or `~all` (softfail) in SPF.",
-                    cwe="CWE-290",
-                    asvs="V14.1.1",
+        if dns.spf:
+            spf_low = dns.spf.lower()
+            if "+all" in spf_low:
+                raw_findings.append(
+                    AssessmentFinding(
+                        id="DNS-003",
+                        severity="MEDIUM",
+                        category="dns",
+                        title="Permissive SPF policy uses `+all`",
+                        evidence=f"SPF: {dns.spf[:140]}",
+                        remediation=(
+                            "Replace `+all` with `-all` (hardfail) or `~all` (softfail) in SPF."
+                        ),
+                        cwe="CWE-290",
+                        asvs="V14.1.1",
+                    )
                 )
-            )
+            elif "?all" in spf_low:
+                raw_findings.append(
+                    AssessmentFinding(
+                        id="DNS-003-NEUTRAL",
+                        severity="LOW",
+                        category="dns",
+                        title="SPF policy uses neutral `?all` mechanism",
+                        evidence=f"SPF: {dns.spf[:140]}",
+                        remediation="Tighten SPF from `?all` to `~all` or `-all`.",
+                        cwe="CWE-290",
+                        asvs="V14.1.1",
+                    )
+                )
+            if dns.spf_lookup_count is not None and dns.spf_lookup_count > 10:
+                raw_findings.append(
+                    AssessmentFinding(
+                        id="DNS-003-LOOKUP",
+                        severity="MEDIUM",
+                        category="dns",
+                        title="SPF record exceeds RFC 7208 10-DNS-lookup limit",
+                        evidence=f"Detected {dns.spf_lookup_count} DNS-querying mechanisms in SPF",
+                        remediation=(
+                            "Flatten or consolidate SPF includes so total DNS lookups remain <= 10."
+                        ),
+                        cwe="CWE-290",
+                        asvs="V14.1.1",
+                    )
+                )
         if dns.dmarc is None:
-            findings.append(
+            raw_findings.append(
                 AssessmentFinding(
                     id="DNS-004",
                     severity="INFO",
                     category="dns",
                     title="No DMARC record detected on hostname",
-                    evidence="TXT lookup on `_dmarc.<host>` returned no `v=DMARC1` record",
-                    remediation="Publish a DMARC policy (`p=quarantine` or `p=reject`) if domain sends/receives mail.",
+                    evidence="TXT lookup on `_dmarc.<host>` (and apex) returned no DMARC record",
+                    remediation=(
+                        "Publish a DMARC policy (`p=quarantine` or `p=reject`) for mail domains."
+                    ),
                     cwe="CWE-290",
                     asvs="V14.1.1",
                 )
             )
-        elif "p=none" in dns.dmarc.lower():
-            findings.append(
+        elif dns.dmarc_policy == "none" or "p=none" in dns.dmarc.lower():
+            raw_findings.append(
                 AssessmentFinding(
                     id="DNS-004-NONE",
                     severity="LOW",
                     category="dns",
                     title="DMARC policy is monitor-only (`p=none`)",
                     evidence=f"DMARC: {dns.dmarc[:140]}",
-                    remediation="Advance DMARC policy from `p=none` to `p=quarantine` or `p=reject`.",
+                    remediation=(
+                        "Advance DMARC policy from `p=none` to `p=quarantine` or `p=reject`."
+                    ),
                     cwe="CWE-290",
                     asvs="V14.1.1",
                 )
             )
         if dns.dnssec_present is False:
-            findings.append(
+            raw_findings.append(
                 AssessmentFinding(
                     id="DNS-005",
                     severity="INFO",
                     category="dns",
                     title="DNSSEC records (DS/DNSKEY) not detected",
-                    evidence="Neither DS nor DNSKEY returned for hostname",
+                    evidence="Neither DS nor DNSKEY returned for hostname or apex",
                     remediation="Consider enabling DNSSEC signing at your DNS registrar/provider.",
                     cwe="CWE-350",
+                    asvs="V9.1.1",
+                )
+            )
+        if dns.mx and (not dns.mta_sts or not dns.tls_rpt):
+            missing_mail = []
+            if not dns.mta_sts:
+                missing_mail.append("_mta-sts")
+            if not dns.tls_rpt:
+                missing_mail.append("_smtp._tls (TLS-RPT)")
+            raw_findings.append(
+                AssessmentFinding(
+                    id="DNS-006",
+                    severity="INFO",
+                    category="dns",
+                    title="Mail-enabled domain missing SMTP TLS transport policies",
+                    evidence=f"MX present ({dns.mx[0]}); missing {', '.join(missing_mail)}",
+                    remediation="Publish RFC 8461 MTA-STS and RFC 8460 TLS-RPT TXT records.",
+                    cwe="CWE-319",
                     asvs="V9.1.1",
                 )
             )
@@ -737,14 +998,17 @@ def evaluate_posture(
     html = profile.html
     if html is not None and html.analyzed:
         if html.mixed_content_urls:
-            findings.append(
+            sample_mc = html.mixed_content_urls[0]
+            raw_findings.append(
                 AssessmentFinding(
                     id="HTML-001",
                     severity="MEDIUM",
                     category="html",
                     title="HTTPS page references plain HTTP mixed-content resources",
-                    evidence=f"{len(html.mixed_content_urls)} URL(s), e.g. {html.mixed_content_urls[0]}",
-                    remediation="Upgrade all embedded scripts, stylesheets, images, and iframes to HTTPS.",
+                    evidence=f"{len(html.mixed_content_urls)} URL(s), e.g. {sample_mc}",
+                    remediation=(
+                        "Upgrade all embedded scripts, stylesheets, images, and iframes to HTTPS."
+                    ),
                     cwe="CWE-319",
                     asvs="V9.1.1",
                 )
@@ -756,29 +1020,46 @@ def evaluate_posture(
                 if html.external_scripts_without_sri
                 else html.external_styles_without_sri[0]
             )
-            findings.append(
+            raw_findings.append(
                 AssessmentFinding(
                     id="HTML-002",
                     severity="LOW",
                     category="html",
-                    title="External scripts or stylesheets loaded without Subresource Integrity (SRI)",
+                    title="External scripts or stylesheets loaded without SRI",
                     evidence=f"{sri_total} third-party resource(s) lack `integrity`, e.g. {sample}",
-                    remediation="Add `integrity=\"sha384-...\" crossorigin=\"anonymous\"` or self-host assets.",
+                    remediation=(
+                        'Add `integrity="sha384-..." crossorigin="anonymous"` or self-host assets.'
+                    ),
                     cwe="CWE-353",
                     asvs="V14.2.3",
                 )
             )
         if html.insecure_forms:
-            findings.append(
+            raw_findings.append(
                 AssessmentFinding(
                     id="HTML-003",
                     severity="HIGH",
                     category="html",
-                    title="HTML form submits credentials or data over unencrypted HTTP",
+                    title="HTML form exposes credentials or submits over insecure transport/method",
                     evidence="; ".join(html.insecure_forms[:3]),
-                    remediation="Serve forms exclusively over HTTPS and use `https://` form actions.",
+                    remediation=(
+                        'Serve forms over HTTPS with `method="POST"` and `https://` actions.'
+                    ),
                     cwe="CWE-319",
                     asvs="V9.1.1",
+                )
+            )
+        if html.unsafe_blank_links > 0:
+            raw_findings.append(
+                AssessmentFinding(
+                    id="HTML-004",
+                    severity="INFO",
+                    category="html",
+                    title='External `target="_blank"` links missing `rel="noopener"`',
+                    evidence=f'{html.unsafe_blank_links} external link(s) omit `rel="noopener"`',
+                    remediation='Add `rel="noopener noreferrer"` to external `_blank` links.',
+                    cwe="CWE-1022",
+                    asvs="V14.4.1",
                 )
             )
 
@@ -786,33 +1067,57 @@ def evaluate_posture(
     wk = profile.well_known
     if wk is not None:
         if not wk.security_txt_present:
-            findings.append(
+            raw_findings.append(
                 AssessmentFinding(
                     id="WK-001",
                     severity="INFO",
                     category="well_known",
                     title="No RFC 9116 `/.well-known/security.txt` published",
                     evidence=f"HTTP status={wk.security_txt_status}",
-                    remediation="Publish `/.well-known/security.txt` with `Contact:` and `Expires:` fields.",
+                    remediation=(
+                        "Publish `/.well-known/security.txt` with `Contact:` and `Expires:`."
+                    ),
                     cwe="CWE-1059",
                     asvs="V1.1.1",
                 )
             )
         elif wk.security_txt_expired:
-            findings.append(
+            raw_findings.append(
                 AssessmentFinding(
                     id="WK-002",
                     severity="LOW",
                     category="well_known",
                     title="Published `/.well-known/security.txt` has expired",
                     evidence=f"Expires: {wk.security_txt_expires}",
-                    remediation="Refresh `Expires:` date and verify disclosure contacts in `security.txt`.",
+                    remediation=(
+                        "Refresh `Expires:` date and verify disclosure contacts in `security.txt`."
+                    ),
+                    cwe="CWE-1059",
+                    asvs="V1.1.1",
+                )
+            )
+        elif wk.security_txt_over_http or not wk.security_txt_expires:
+            reason_wk = (
+                "served over plain HTTP"
+                if wk.security_txt_over_http
+                else "missing required `Expires:` field"
+            )
+            raw_findings.append(
+                AssessmentFinding(
+                    id="WK-004",
+                    severity="LOW",
+                    category="well_known",
+                    title="RFC 9116 `security.txt` compliance gap",
+                    evidence=f"security.txt is {reason_wk}",
+                    remediation=(
+                        "Serve `/.well-known/security.txt` over HTTPS with a valid `Expires:` date."
+                    ),
                     cwe="CWE-1059",
                     asvs="V1.1.1",
                 )
             )
         if wk.robots_sensitive_hints:
-            findings.append(
+            raw_findings.append(
                 AssessmentFinding(
                     id="WK-003",
                     severity="INFO",
@@ -833,12 +1138,15 @@ def evaluate_posture(
         kev_records = [r for r in cve.records if r.in_kev]
         if kev_records:
             kev_ids = ", ".join(r.cve_id for r in kev_records[:5])
-            findings.append(
+            raw_findings.append(
                 AssessmentFinding(
                     id="CVE-KEV",
                     severity="CRITICAL",
                     category="cve",
-                    title=f"Correlated {len(kev_records)} CISA Known Exploited Vulnerability (KEV) CVE(s)",
+                    title=(
+                        f"Correlated {len(kev_records)} CISA Known Exploited "
+                        "Vulnerability (KEV) CVE(s)"
+                    ),
                     evidence=f"KEV IDs: {kev_ids}",
                     remediation=(
                         "Prioritize immediate patching/mitigation — these CVEs have confirmed "
@@ -852,7 +1160,7 @@ def evaluate_posture(
         has_versioned = any(m.version is not None for m in fingerprint.matches)
         top_ids = ", ".join(r.cve_id for r in cve.records[:5])
         if has_versioned:
-            findings.append(
+            raw_findings.append(
                 AssessmentFinding(
                     id="CVE-VER",
                     severity="HIGH",
@@ -869,7 +1177,7 @@ def evaluate_posture(
                 )
             )
         else:
-            findings.append(
+            raw_findings.append(
                 AssessmentFinding(
                     id="CVE-UNVER",
                     severity="INFO",
@@ -887,7 +1195,31 @@ def evaluate_posture(
                 )
             )
 
+    # Enrich with OWASP/NIST compliance tags and apply preset / suppression waivers.
+    ignore_upper = {fid.strip().upper() for fid in (ignore_findings or set()) if fid.strip()}
+    findings: list[AssessmentFinding] = []
+    suppressed: list[AssessmentFinding] = []
+
+    for item in raw_findings:
+        enriched = _attach_compliance(item)
+        if (
+            norm_preset == "strict"
+            and enriched.id in _STRICT_PROMOTE_IDS
+            and enriched.severity == "INFO"
+        ):
+            enriched = replace(enriched, severity="LOW")
+        if norm_preset == "api" and (
+            enriched.id in _API_EXCLUDED_IDS or enriched.category in _API_EXCLUDED_CATEGORIES
+        ):
+            suppressed.append(enriched)
+            continue
+        if enriched.id.upper() in ignore_upper:
+            suppressed.append(enriched)
+            continue
+        findings.append(enriched)
+
     findings.sort(key=lambda f: (_SEVERITY_ORDER.get(f.severity, 99), f.id))
+    suppressed.sort(key=lambda f: (_SEVERITY_ORDER.get(f.severity, 99), f.id))
 
     counts = {sev: 0 for sev in _SEVERITY_ORDER}
     raw_domain_penalties: dict[str, int] = {dom: 0 for dom in _DOMAIN_PENALTY_CAPS}
@@ -912,5 +1244,24 @@ def evaluate_posture(
         risk_level=_compute_risk_level(score, counts),
         counts=counts,
         category_scores=category_scores,
+    )
+    return posture, findings, suppressed
+
+
+def evaluate_posture(
+    profile: ProfileResult,
+    fingerprint: FingerprintResult,
+    cve: CVESearchResult | None = None,
+    *,
+    preset: str = "web",
+    ignore_findings: set[str] | None = None,
+) -> tuple[PostureScore, list[AssessmentFinding]]:
+    """Derive prioritized CWE/ASVS/OWASP/NIST findings and a category-capped posture score."""
+    posture, findings, _ = evaluate_posture_with_suppressions(
+        profile,
+        fingerprint,
+        cve,
+        preset=preset,
+        ignore_findings=ignore_findings,
     )
     return posture, findings

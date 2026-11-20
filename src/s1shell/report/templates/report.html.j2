@@ -148,7 +148,7 @@
       <h2>Prioritized Findings &amp; Remediation</h2>
       <table>
         <thead>
-          <tr><th>ID</th><th>Severity</th><th>Category</th><th>CWE / ASVS</th><th>Title &amp; Evidence</th><th>Remediation</th></tr>
+          <tr><th>ID</th><th>Severity</th><th>Category</th><th>Compliance</th><th>Title &amp; Evidence</th><th>Remediation</th></tr>
         </thead>
         <tbody>
         {% for f in bundle.findings %}
@@ -158,7 +158,9 @@
             <td>{{ f.category }}</td>
             <td>
               {% if f.get("cwe") %}<code>{{ f.cwe }}</code>{% else %}—{% endif %}
-              {% if f.get("asvs") %}<div class="muted"><code>{{ f.asvs }}</code></div>{% endif %}
+              {% if f.get("asvs") %}<div class="muted"><code>ASVS {{ f.asvs }}</code></div>{% endif %}
+              {% if f.get("owasp") %}<div class="muted"><code>{{ f.owasp }}</code></div>{% endif %}
+              {% if f.get("nist") %}<div class="muted"><code>NIST {{ f.nist }}</code></div>{% endif %}
             </td>
             <td>
               <strong>{{ f.title }}</strong>
@@ -169,6 +171,16 @@
         {% endfor %}
         </tbody>
       </table>
+    </div>
+    {% endif %}
+
+    {% if bundle.remediation_snippets %}
+    <div class="card">
+      <h2>Deterministic Hardening Playbook</h2>
+      {% for snip in bundle.remediation_snippets %}
+      <h3>{{ snip.title }} <span class="muted">({{ snip.stack }} &mdash; {{ snip.finding_ids | join(", ") }})</span></h3>
+      <pre>{{ snip.config }}</pre>
+      {% endfor %}
     </div>
     {% endif %}
 
@@ -226,6 +238,12 @@
         {% if prof.protocol.redirect_location %}
         | Redirect Location (not followed): <code>{{ prof.protocol.redirect_location }}</code>
         {% endif %}
+        {% if prof.protocol.get("methods_checked") %}
+        <br><strong>Allowed HTTP Methods:</strong> <code>{{ prof.protocol.get("allowed_methods", []) | join(", ") or "none advertised" }}</code>
+        {% if prof.protocol.get("risky_methods") %}
+        | Risky: <span class="badge HIGH">{{ prof.protocol.risky_methods | join(", ") }}</span>
+        {% endif %}
+        {% endif %}
       </p>
 
       {% if prof.dns %}
@@ -258,6 +276,9 @@
         <br>Key: <code>{{ prof.tls.key_type }} {{ prof.tls.get("key_size") or "" }}</code> |
         Sig: <code>{{ prof.tls.get("signature_algorithm") or "—" }}</code> |
         SCT: <strong>{{ "Yes" if prof.tls.get("has_sct") else "No" }}</strong>
+        {% endif %}
+        {% if prof.tls.get("spki_sha256") %}
+        <br>SPKI Pin (SHA-256): <code>{{ prof.tls.spki_sha256 }}</code>
         {% endif %}
         {% if prof.tls.supported_versions %}
         <br>Supported Versions: <code>{{ prof.tls.supported_versions | join(", ") }}</code>

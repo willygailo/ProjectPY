@@ -1,4 +1,4 @@
-"""SARIF 2.1.0 serializer for S1shell defensive findings (GitHub/GitLab/DefectDojo ready)."""
+"""SARIF 2.1.0 serializer for S1shell posture findings and dependency/SBOM audits."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ from typing import Any
 
 from s1shell import __version__
 from s1shell.config import DEFAULT_PROJECT_URL
+from s1shell.cve.models import DependencyAuditResult
 
 _SARIF_SCHEMA = (
     "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json"
@@ -49,6 +50,8 @@ def build_sarif_payload(
         remediation = str(finding.get("remediation", ""))
         cwe = finding.get("cwe")
         asvs = finding.get("asvs")
+        owasp = finding.get("owasp")
+        nist = finding.get("nist")
 
         if rule_id not in rules_by_id:
             tags = ["security", "defensive", category]
@@ -56,6 +59,10 @@ def build_sarif_payload(
                 tags.append(f"external/cwe/{str(cwe).lower()}")
             if asvs:
                 tags.append(f"owasp/asvs/{asvs}")
+            if owasp:
+                tags.append(f"owasp/top10/{owasp}")
+            if nist:
+                tags.append(f"nist/800-53/{nist}")
             rules_by_id[rule_id] = {
                 "id": rule_id,
                 "name": rule_id.replace("-", "_"),
@@ -91,6 +98,10 @@ def build_sarif_payload(
             res_entry["properties"]["cwe"] = str(cwe)
         if asvs:
             res_entry["properties"]["asvs"] = str(asvs)
+        if owasp:
+            res_entry["properties"]["owasp"] = str(owasp)
+        if nist:
+            res_entry["properties"]["nist"] = str(nist)
         results.append(res_entry)
 
     run: dict[str, Any] = {
@@ -129,3 +140,35 @@ def render_sarif(
         posture=posture,
     )
     return json.dumps(payload, indent=2)
+
+
+def render_dependency_sarif(audit_result: DependencyAuditResult) -> str:
+    """Serialize lockfile/SBOM dependency vulnerabilities into SARIF 2.1.0 JSON."""
+    finding_dicts: list[dict[str, Any]] = []
+    for vuln in audit_result.vulnerabilities:
+        fix_note = (
+            f"Upgrade {vuln.package} to {', '.join(vuln.fixed_versions[:3])}."
+            if vuln.fixed_versions
+            else f"Review advisory {vuln.vuln_id} and patch/replace {vuln.package}."
+        )
+        kev_tag = " [CISA KEV]" if vuln.in_kev else ""
+        finding_dicts.append(
+            {
+                "id": vuln.cve_id or vuln.vuln_id,
+                "severity": "CRITICAL" if vuln.in_kev else vuln.severity,
+                "category": "dependency",
+                "title": (
+                    f"{vuln.package}=={vuln.version} ({vuln.ecosystem}): {vuln.vuln_id}{kev_tag}"
+                ),
+                "evidence": vuln.summary,
+                "remediation": fix_note,
+                "cwe": "CWE-1395",
+                "owasp": "A06:2021",
+                "nist": "SI-2",
+            }
+        )
+    return render_sarif(
+        findings=finding_dicts,
+        target_uri=audit_result.source_file,
+        tool_version=audit_result.tool_version,
+    )

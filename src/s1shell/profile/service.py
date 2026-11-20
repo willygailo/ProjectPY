@@ -14,7 +14,7 @@ from s1shell.profile.header_check import analyze_headers, detect_http3_from_alt_
 from s1shell.profile.html_check import analyze_html_body
 from s1shell.profile.models import ProfileResult, ProtocolInfo, WellKnownCheck
 from s1shell.profile.tls_check import inspect_tls
-from s1shell.profile.well_known import inspect_well_known
+from s1shell.profile.well_known import inspect_http_methods, inspect_well_known
 from s1shell.scope import ScopeManager
 from s1shell.target_fetch import TLSInspectorFn, fetch_target_snapshot
 
@@ -51,6 +51,7 @@ class ProfileService:
         check_tls_versions: bool = False,
         check_dns_security: bool = False,
         check_well_known: bool = False,
+        check_methods: bool = False,
     ) -> ProfileResult:
         """Profile a single authorized target (1 HTTP request + 1 TLS handshake by default)."""
 
@@ -86,6 +87,25 @@ class ProfileService:
                 if 300 <= resp.status_code < 400
                 else None
             )
+
+            verify_arg: ssl.SSLContext | bool = True
+            if self.cafile is not None:
+                verify_arg = ssl.create_default_context(cafile=self.cafile)
+            elif snapshot.tls is not None and not snapshot.tls.verified:
+                verify_arg = False
+
+            allowed_methods: list[str] = []
+            risky_methods: list[str] = []
+            if check_methods:
+                allowed_methods, risky_methods = inspect_http_methods(
+                    self.cfg,
+                    parsed=parsed,
+                    pinned_ip=effective_ip,
+                    pinned_ips=ctx.scope_result.resolved_ips,
+                    verify=verify_arg,
+                    http_transport=self.http_transport,
+                )
+
             protocol = ProtocolInfo(
                 status_code=resp.status_code,
                 http_version=resp.http_version,
@@ -96,6 +116,9 @@ class ProfileService:
                 alt_svc=alt_svc,
                 redirect_location=location,
                 body_truncated=resp.truncated,
+                methods_checked=check_methods,
+                allowed_methods=allowed_methods,
+                risky_methods=risky_methods,
             )
             header_analysis = analyze_headers(resp.headers, is_https=snapshot.is_https)
             html_analysis = analyze_html_body(
@@ -106,11 +129,6 @@ class ProfileService:
 
             well_known: WellKnownCheck | None = None
             if check_well_known:
-                verify_arg: ssl.SSLContext | bool = True
-                if self.cafile is not None:
-                    verify_arg = ssl.create_default_context(cafile=self.cafile)
-                elif snapshot.tls is not None and not snapshot.tls.verified:
-                    verify_arg = False
                 well_known = inspect_well_known(
                     self.cfg,
                     parsed=parsed,

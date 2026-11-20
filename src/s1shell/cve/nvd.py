@@ -105,13 +105,17 @@ def is_version_affected(
             continue
 
         in_range = True
-        if rng.version_start_including and compare_versions(version, rng.version_start_including) < 0:
+        start_inc = rng.version_start_including
+        start_exc = rng.version_start_excluding
+        end_inc = rng.version_end_including
+        end_exc = rng.version_end_excluding
+        if start_inc and compare_versions(version, start_inc) < 0:
             in_range = False
-        if rng.version_start_excluding and compare_versions(version, rng.version_start_excluding) <= 0:
+        if start_exc and compare_versions(version, start_exc) <= 0:
             in_range = False
-        if rng.version_end_including and compare_versions(version, rng.version_end_including) > 0:
+        if end_inc and compare_versions(version, end_inc) > 0:
             in_range = False
-        if rng.version_end_excluding and compare_versions(version, rng.version_end_excluding) >= 0:
+        if end_exc and compare_versions(version, end_exc) >= 0:
             in_range = False
         if in_range:
             return True

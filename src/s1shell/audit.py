@@ -145,7 +145,9 @@ class AuditEvent:
                 entry_hash=str(data["entry_hash"]) if data.get("entry_hash") else None,
             )
         except (KeyError, TypeError, ValueError) as exc:
-            raise ValidationError(f"Corrupt audit log line: missing/invalid field ({exc}).") from exc
+            raise ValidationError(
+                f"Corrupt audit log line: missing/invalid field ({exc})."
+            ) from exc
 
 
 @dataclass(frozen=True)
@@ -253,9 +255,7 @@ class AuditLogger:
 
             recomputed = _compute_entry_hash(ev._core_dict(), ev.prev_hash)
             if ev.entry_hash != recomputed:
-                errors.append(
-                    f"Line {idx}: entry_hash mismatch (record tampered or altered)."
-                )
+                errors.append(f"Line {idx}: entry_hash mismatch (record tampered or altered).")
             expected_prev = ev.entry_hash
 
         return AuditVerifyResult(

@@ -13,14 +13,26 @@ from pathlib import Path
 from s1shell import __version__
 from s1shell.ai.models import AIAnalysisResult
 from s1shell.ai.service import AIService
-from s1shell.assess.models import AssessmentResult, BatchAssessmentResult, BatchTargetSummary
-from s1shell.assess.scorer import evaluate_posture
+from s1shell.assess.models import (
+    AssessmentResult,
+    BatchAssessmentResult,
+    BatchTargetSummary,
+    RemediationSnippet,
+)
+from s1shell.assess.remediate import generate_remediation_plan
+from s1shell.assess.scorer import evaluate_posture_with_suppressions, highest_severity
 from s1shell.audit import AuditLogger
 from s1shell.config import RuntimeConfig
 from s1shell.cve.models import CVERecord, CVESearchFilter, CVESearchResult
 from s1shell.cve.nvd import is_version_affected
 from s1shell.cve.service import CVEService
-from s1shell.errors import ExitCode, OutOfScopeError, S1ShellError, UnauthorizedError, ValidationError
+from s1shell.errors import (
+    ExitCode,
+    OutOfScopeError,
+    S1ShellError,
+    UnauthorizedError,
+    ValidationError,
+)
 from s1shell.fingerprint.matcher import match_signatures
 from s1shell.fingerprint.models import FingerprintResult
 from s1shell.fingerprint.service import FingerprintService
@@ -70,12 +82,13 @@ def build_report_bundle_from_assessment(
         ai_analysis=(
             to_json_compatible(result.ai_analysis) if result.ai_analysis is not None else None
         ),
+        remediation_snippets=[to_json_compatible(s) for s in result.remediation_snippets],
         generated_at_utc=metadata.generated_at_utc,
     )
 
 
 class AssessService:
-    """Runs the unified profile -> fingerprint -> CVE -> posture -> report pipeline."""
+    """Runs the unified profile -> fingerprint -> CVE -> posture -> remediation -> report flow."""
 
     def __init__(
         self,
@@ -136,6 +149,7 @@ class AssessService:
         check_tls_versions: bool = True,
         check_dns_security: bool = True,
         check_well_known: bool = False,
+        check_methods: bool = False,
         skip_cve: bool = False,
         enrich_cve: bool = False,
         min_cvss: float = 7.0,
@@ -145,6 +159,9 @@ class AssessService:
         ai_provider: str | None = None,
         ai_mode: str = "triage",
         ai_redact: bool = False,
+        preset: str = "web",
+        ignore_findings: set[str] | None = None,
+        include_remediation: bool = True,
         operator: str | None = None,
         out_dir: Path | None = None,
     ) -> AssessmentResult:
@@ -158,6 +175,7 @@ class AssessService:
             check_tls_versions=check_tls_versions,
             check_dns_security=check_dns_security,
             check_well_known=check_well_known,
+            check_methods=check_methods,
         )
 
         tls_issuer = prof.tls.issuer if prof.tls is not None else None
@@ -201,9 +219,14 @@ class AssessService:
 
             combined: dict[str, CVERecord] = {}
             all_cached = True
-            for kw, cpe_str, version in queries:
+            for kw_q, cpe_str, version in queries:
                 sub = self.cve_service.search(
-                    CVESearchFilter(keyword=kw, cpe=cpe_str, min_cvss=min_cvss, limit=cve_limit),
+                    CVESearchFilter(
+                        keyword=kw_q,
+                        cpe=cpe_str,
+                        min_cvss=min_cvss,
+                        limit=cve_limit,
+                    ),
                     offline=offline_cve,
                     enrich=enrich_cve,
                 )
@@ -250,24 +273,39 @@ class AssessService:
                 records=ordered,
             )
 
-        posture, findings = evaluate_posture(prof, fp, cve_res)
+        posture, findings, suppressed = evaluate_posture_with_suppressions(
+            prof,
+            fp,
+            cve_res,
+            preset=preset,
+            ignore_findings=ignore_findings,
+        )
+
+        rem_snippets: list[RemediationSnippet] = []
+        if include_remediation and findings:
+            rem_plan = generate_remediation_plan(
+                target_url=prof.url,
+                findings=findings,
+                fingerprint_matches=[to_json_compatible(m) for m in fp.matches],
+                stack="auto",
+            )
+            rem_snippets = rem_plan.snippets
 
         ai_res: AIAnalysisResult | None = None
         if run_ai:
             summary_payload = {
                 "target": prof.url,
+                "preset": preset,
                 "posture": to_json_compatible(posture),
                 "findings": [to_json_compatible(f) for f in findings],
                 "matches": [to_json_compatible(m) for m in fp.matches],
                 "cve_count": len(cve_res.records) if cve_res else 0,
-                "kev_count": (
-                    sum(1 for r in cve_res.records if r.in_kev) if cve_res else 0
-                ),
+                "kev_count": (sum(1 for r in cve_res.records if r.in_kev) if cve_res else 0),
             }
             ai_prompt = (
                 "Provide a concise defensive executive summary and prioritized remediation "
                 "plan for this authorized target assessment:\n\n"
-                "<untrusted_telemetry source=\"assessment_summary\">\n"
+                '<untrusted_telemetry source="assessment_summary">\n'
                 f"{json.dumps(summary_payload, indent=2)}\n"
                 "</untrusted_telemetry>"
             )
@@ -290,6 +328,9 @@ class AssessService:
             fingerprint=fp,
             cve=cve_res,
             ai_analysis=ai_res,
+            preset=preset.strip().lower(),
+            suppressed_findings=suppressed,
+            remediation_snippets=rem_snippets,
         )
 
         if out_dir is not None:
@@ -324,9 +365,7 @@ class AssessService:
             saved.append(str(html_path))
 
             sarif_path = resolved_dir / "report.sarif"
-            sarif_path.write_text(
-                self.report_service.render(bundle, fmt="sarif"), encoding="utf-8"
-            )
+            sarif_path.write_text(self.report_service.render(bundle, fmt="sarif"), encoding="utf-8")
             saved.append(str(sarif_path))
 
             assess_path = resolved_dir / "assess.json"
@@ -345,6 +384,7 @@ class AssessService:
         check_tls_versions: bool = True,
         check_dns_security: bool = True,
         check_well_known: bool = False,
+        check_methods: bool = False,
         skip_cve: bool = False,
         enrich_cve: bool = False,
         min_cvss: float = 7.0,
@@ -354,13 +394,13 @@ class AssessService:
         ai_provider: str | None = None,
         ai_mode: str = "triage",
         ai_redact: bool = False,
+        preset: str = "web",
+        ignore_findings: set[str] | None = None,
         operator: str | None = None,
         out_dir: Path | None = None,
     ) -> BatchAssessmentResult:
         """Sequentially assess multiple targets (`concurrency=1`) enforcing scope per target."""
-        clean_targets = [
-            t.strip() for t in targets if t.strip() and not t.strip().startswith("#")
-        ]
+        clean_targets = [t.strip() for t in targets if t.strip() and not t.strip().startswith("#")]
         if not clean_targets:
             raise ValidationError("No targets provided for batch assessment.")
         if delay_seconds < 0:
@@ -392,6 +432,7 @@ class AssessService:
                     check_tls_versions=check_tls_versions,
                     check_dns_security=check_dns_security,
                     check_well_known=check_well_known,
+                    check_methods=check_methods,
                     skip_cve=skip_cve,
                     enrich_cve=enrich_cve,
                     min_cvss=min_cvss,
@@ -401,6 +442,8 @@ class AssessService:
                     ai_provider=ai_provider,
                     ai_mode=ai_mode,
                     ai_redact=ai_redact,
+                    preset=preset,
+                    ignore_findings=ignore_findings,
                     operator=operator,
                     out_dir=target_dir,
                 )
@@ -416,6 +459,7 @@ class AssessService:
                         score=res.posture.score,
                         grade=res.posture.grade,
                         risk_level=res.posture.risk_level,
+                        highest_severity=highest_severity(res.findings),
                         finding_count=len(res.findings),
                         cve_count=len(res.cve.records) if res.cve else 0,
                     )
@@ -462,7 +506,15 @@ class AssessService:
             saved_files=saved_files,
         )
         if resolved_out is not None:
+            html_path = resolved_out / "batch_report.html"
+            html_path.write_text(
+                self.report_service.render_batch_html(batch_res, operator=operator),
+                encoding="utf-8",
+            )
             summary_path = resolved_out / "batch_summary.json"
-            batch_res = replace(batch_res, saved_files=[*saved_files, str(summary_path)])
+            batch_res = replace(
+                batch_res,
+                saved_files=[*saved_files, str(html_path), str(summary_path)],
+            )
             summary_path.write_text(dumps_json(batch_res), encoding="utf-8")
         return batch_res

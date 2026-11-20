@@ -138,6 +138,17 @@ class ScopeCheckResult:
     reason: str
 
 
+@dataclass(frozen=True)
+class ScopeImportResult:
+    """Summary of bulk-importing authorized targets or exclusions into scope.yaml."""
+
+    source: str
+    dry_run: bool
+    added: list[ScopeEntry]
+    skipped: list[str]
+    errors: list[str]
+
+
 def parse_expiry(value: str) -> datetime:
     """Parse YYYY-MM-DD (inclusive end of UTC day) or ISO-8601 timestamp."""
     text = value.strip()
@@ -509,6 +520,100 @@ class ScopeManager:
         self.save(entries)
         return new_entry
 
+    def import_targets(
+        self,
+        raw_lines: list[str],
+        *,
+        source: str,
+        owner: str,
+        auth_ref: str,
+        expires: str,
+        include_subdomains: bool = False,
+        notes: str | None = None,
+        replace: bool = False,
+        exclude: bool = False,
+        dry_run: bool = False,
+    ) -> ScopeImportResult:
+        """Bulk-import newline-delimited targets (prefix `!` marks per-line exclusions)."""
+        if not owner.strip():
+            raise ValidationError("Scope entry 'owner' must not be empty.")
+        if not auth_ref.strip():
+            raise ValidationError("Scope entry 'auth_ref' must not be empty.")
+        parse_expiry(expires)
+
+        entries = self.load()
+        added: list[ScopeEntry] = []
+        skipped: list[str] = []
+        errors: list[str] = []
+
+        for line_no, raw_line in enumerate(raw_lines, start=1):
+            stripped = raw_line.split("#", 1)[0].strip()
+            if not stripped:
+                continue
+            line_exclude = exclude
+            target_text = stripped
+            if target_text.startswith("!"):
+                line_exclude = True
+                target_text = target_text[1:].strip()
+            if not target_text:
+                continue
+
+            try:
+                entry_type, norm_target, sub_flag = parse_scope_spec(
+                    target_text, include_subdomains=include_subdomains
+                )
+            except ValidationError as exc:
+                errors.append(f"Line {line_no} ({target_text}): {exc}")
+                continue
+
+            matching_active = [
+                e
+                for e in entries
+                if not e.is_expired()
+                and e.type == entry_type
+                and e.target.lower() == norm_target.lower()
+                and e.exclude == line_exclude
+            ]
+            if matching_active and not replace:
+                skipped.append(norm_target)
+                continue
+            if replace:
+                entries = [
+                    e
+                    for e in entries
+                    if not (
+                        e.type == entry_type
+                        and e.target.lower() == norm_target.lower()
+                        and e.exclude == line_exclude
+                    )
+                ]
+
+            new_entry = ScopeEntry(
+                id=uuid.uuid4().hex[:8],
+                target=norm_target,
+                type=entry_type,
+                include_subdomains=sub_flag,
+                owner=owner.strip(),
+                auth_ref=auth_ref.strip(),
+                created_at=utc_now_iso(),
+                expires_at=expires.strip(),
+                notes=notes.strip() if notes else None,
+                exclude=line_exclude,
+            )
+            entries.append(new_entry)
+            added.append(new_entry)
+
+        if added and not dry_run:
+            self.save(entries)
+
+        return ScopeImportResult(
+            source=source,
+            dry_run=dry_run,
+            added=added,
+            skipped=skipped,
+            errors=errors,
+        )
+
     def remove(self, identifier: str) -> list[ScopeEntry]:
         """Remove entries matching an ID or exact target string; return removed entries."""
         entries = self.load()
@@ -571,9 +676,7 @@ class ScopeManager:
             expired_matches = [
                 e
                 for e in entries
-                if not e.exclude
-                and e.is_expired(now=now)
-                and entry_matches_structurally(e, parsed)
+                if not e.exclude and e.is_expired(now=now) and entry_matches_structurally(e, parsed)
             ]
             reason = (
                 f"Matched scope entry '{expired_matches[0].id}' is expired "

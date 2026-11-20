@@ -1,4 +1,4 @@
-"""Canonical dataclasses for `s1shell assess`, batch runs, and posture drift diffs."""
+"""Canonical dataclasses for `s1shell assess`, batch runs, remediation plans, and diffs."""
 
 from __future__ import annotations
 
@@ -18,12 +18,14 @@ class AssessmentFinding:
 
     id: str
     severity: str  # CRITICAL | HIGH | MEDIUM | LOW | INFO
-    category: str  # tls | headers | cookies | disclosure | transport | cors | cve | dns | html | well_known
+    category: str  # tls | headers | cookies | disclosure | transport | cors | cve | dns | html ...
     title: str
     evidence: str
     remediation: str
     cwe: str | None = None
     asvs: str | None = None
+    owasp: str | None = None
+    nist: str | None = None
 
 
 @dataclass(frozen=True)
@@ -35,6 +37,31 @@ class PostureScore:
     risk_level: str  # MINIMAL | LOW | MODERATE | HIGH | CRITICAL
     counts: dict[str, int] = field(default_factory=dict)
     category_scores: dict[str, int] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class RemediationSnippet:
+    """Single copy-pasteable defensive hardening snippet addressing specific finding IDs."""
+
+    title: str
+    stack: str
+    finding_ids: list[str]
+    language: str
+    config: str
+
+
+@dataclass(frozen=True)
+class RemediationPlan:
+    """Canonical output envelope for offline deterministic remediation playbooks."""
+
+    target: str
+    detected_stacks: list[str]
+    selected_stack: str
+    snippets: list[RemediationSnippet] = field(default_factory=list)
+    schema_version: str = SCHEMA_VERSION
+    tool_version: str = __version__
+    generated_at_utc: str = field(default_factory=utc_now_iso)
+    artifact_type: str = "remediation_plan"
 
 
 @dataclass(frozen=True)
@@ -52,6 +79,9 @@ class AssessmentResult:
     fingerprint: FingerprintResult
     cve: CVESearchResult | None = None
     ai_analysis: AIAnalysisResult | None = None
+    preset: str = "web"
+    suppressed_findings: list[AssessmentFinding] = field(default_factory=list)
+    remediation_snippets: list[RemediationSnippet] = field(default_factory=list)
     saved_files: list[str] = field(default_factory=list)
     schema_version: str = SCHEMA_VERSION
     tool_version: str = __version__
@@ -70,6 +100,7 @@ class BatchTargetSummary:
     score: int | None = None
     grade: str | None = None
     risk_level: str | None = None
+    highest_severity: str | None = None
     finding_count: int = 0
     cve_count: int = 0
     error: str | None = None

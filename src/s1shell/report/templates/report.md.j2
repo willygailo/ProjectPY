@@ -21,10 +21,21 @@
 {% if bundle.findings %}
 ## Prioritized Findings & Remediation
 
-| ID | Severity | Category | CWE | ASVS | Title | Evidence | Remediation |
-|---|---|---|---|---|---|---|---|
+| ID | Severity | Category | CWE | ASVS | OWASP | NIST | Title | Evidence | Remediation |
+|---|---|---|---|---|---|---|---|---|---|
 {% for f in bundle.findings -%}
-| `{{ f.id }}` | {{ f.severity }} | {{ f.category }} | `{{ f.get("cwe") | md_cell }}` | `{{ f.get("asvs") | md_cell }}` | {{ f.title | md_cell }} | `{{ f.evidence | md_cell }}` | {{ f.remediation | md_cell }} |
+| `{{ f.id }}` | {{ f.severity }} | {{ f.category }} | `{{ f.get("cwe") | md_cell }}` | `{{ f.get("asvs") | md_cell }}` | `{{ f.get("owasp") | md_cell }}` | `{{ f.get("nist") | md_cell }}` | {{ f.title | md_cell }} | `{{ f.evidence | md_cell }}` | {{ f.remediation | md_cell }} |
+{% endfor %}
+{% endif %}
+
+{% if bundle.remediation_snippets %}
+## Deterministic Hardening Playbook
+{% for snip in bundle.remediation_snippets %}
+### {{ snip.title }} (`{{ snip.stack }}` — {{ snip.finding_ids | join(", ") }})
+
+```{{ snip.language }}
+{{ snip.config }}
+```
 {% endfor %}
 {% endif %}
 

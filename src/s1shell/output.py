@@ -1,4 +1,4 @@
-"""Terminal (Rich), JSON, Markdown, and file output helpers."""
+"""Terminal (Rich), JSON, Markdown, HTML, SARIF, and file output helpers."""
 
 from __future__ import annotations
 
@@ -14,18 +14,20 @@ from s1shell.assess.models import (
     AssessmentDiffResult,
     AssessmentResult,
     BatchAssessmentResult,
+    RemediationPlan,
 )
 from s1shell.assess.service import build_report_bundle_from_assessment
 from s1shell.audit import AuditEvent, AuditVerifyResult
 from s1shell.config import RuntimeConfig
-from s1shell.cve.models import CVESearchResult
+from s1shell.cve.models import CVESearchResult, DependencyAuditResult
 from s1shell.doctor import DoctorReport
 from s1shell.errors import ValidationError
 from s1shell.fingerprint.models import FingerprintResult
 from s1shell.models import dumps_json
 from s1shell.profile.models import ProfileResult
+from s1shell.report.sarif import render_dependency_sarif
 from s1shell.report.service import ReportService
-from s1shell.scope import ScopeCheckResult, ScopeEntry
+from s1shell.scope import ScopeCheckResult, ScopeEntry, ScopeImportResult
 
 
 def make_console(*, no_color: bool = False, file: TextIO | None = None) -> Console:
@@ -99,8 +101,8 @@ def render_cve_result(
         return
     if norm == "md":
         lines = [
-            "| CVE ID | CVSS | Severity | KEV | EPSS | Published | Description |",
-            "|---|---|---|---|---|---|---|",
+            "| CVE ID | Priority | CVSS | Severity | KEV | EPSS | Published | Description |",
+            "|---|---|---|---|---|---|---|---|",
         ]
         for rec in result.records:
             score = str(rec.cvss.base_score) if rec.cvss else "—"
@@ -109,7 +111,7 @@ def render_cve_result(
             epss = f"{rec.epss_score * 100:.1f}%" if rec.epss_score is not None else "—"
             desc = _md_cell(rec.description)
             lines.append(
-                f"| `{rec.cve_id}` | {score} | {sev} | {kev} | {epss} | "
+                f"| `{rec.cve_id}` | `{rec.priority}` | {score} | {sev} | {kev} | {epss} | "
                 f"{rec.published[:10]} | {desc} |"
             )
         write_or_print("\n".join(lines), out_file=out_file, stdout=stdout)
@@ -117,6 +119,7 @@ def render_cve_result(
 
     table = Table(title=f"CVE Results (cached={result.cached})")
     table.add_column("CVE ID", style="cyan", no_wrap=True)
+    table.add_column("Priority", no_wrap=True)
     table.add_column("CVSS", justify="right")
     table.add_column("Severity")
     table.add_column("KEV", no_wrap=True)
@@ -129,8 +132,75 @@ def render_cve_result(
         kev = "YES" if rec.in_kev else "—"
         epss = f"{rec.epss_score * 100:.1f}%" if rec.epss_score is not None else "—"
         desc = rec.description[:140] + ("..." if len(rec.description) > 140 else "")
-        table.add_row(rec.cve_id, score, sev, kev, epss, rec.published[:10], desc)
+        table.add_row(rec.cve_id, rec.priority, score, sev, kev, epss, rec.published[:10], desc)
 
+    _emit_tables([table], console=console, out_file=out_file, stdout=stdout)
+
+
+def render_dependency_audit(
+    result: DependencyAuditResult,
+    *,
+    fmt: str,
+    console: Console,
+    out_file: Path | None = None,
+    stdout: TextIO | None = None,
+) -> None:
+    """Render `s1shell cve audit` lockfile/SBOM findings in `table`, `json`, `md`, or `sarif`."""
+    norm = _require_format(fmt, ("table", "json", "md", "sarif"), command="cve audit")
+    if norm == "json":
+        write_or_print(dumps_json(result), out_file=out_file, stdout=stdout)
+        return
+    if norm == "sarif":
+        write_or_print(render_dependency_sarif(result), out_file=out_file, stdout=stdout)
+        return
+    if norm == "md":
+        lines = [
+            f"# S1shell Dependency & SBOM Audit: `{result.source_file}`",
+            "",
+            (
+                f"- **Format:** `{result.format_detected}` | **Packages Scanned:** "
+                f"{result.packages_scanned} | **Vulnerable Packages:** {result.vulnerable_packages}"
+            ),
+            f"- **Vulnerabilities Found:** {len(result.vulnerabilities)} (cached={result.cached})",
+            "",
+            "| Package | Version | Eco | ID / CVE | Priority | Sev | KEV | EPSS | Fix | Summary |",
+            "|---|---|---|---|---|---|---|---|---|---|",
+        ]
+        for v in result.vulnerabilities:
+            ident = f"{v.vuln_id} ({v.cve_id})" if v.cve_id and v.cve_id != v.vuln_id else v.vuln_id
+            kev = "YES" if v.in_kev else "—"
+            epss = f"{v.epss_score * 100:.1f}%" if v.epss_score is not None else "—"
+            fix = ", ".join(v.fixed_versions[:2]) or "—"
+            lines.append(
+                f"| `{_md_cell(v.package)}` | `{_md_cell(v.version)}` | {v.ecosystem} | "
+                f"`{_md_cell(ident)}` | `{v.priority}` | {v.severity} | {kev} | {epss} | "
+                f"`{_md_cell(fix)}` | {_md_cell(v.summary)} |"
+            )
+        write_or_print("\n".join(lines), out_file=out_file, stdout=stdout)
+        return
+
+    table = Table(
+        title=(
+            f"Dependency Audit: {result.source_file} ({result.format_detected}, "
+            f"{result.packages_scanned} pkgs, {len(result.vulnerabilities)} vulns)"
+        )
+    )
+    table.add_column("Package", style="cyan")
+    table.add_column("Version")
+    table.add_column("ID / CVE", no_wrap=True)
+    table.add_column("Priority", no_wrap=True)
+    table.add_column("Sev")
+    table.add_column("KEV")
+    table.add_column("EPSS", justify="right")
+    table.add_column("Fixed")
+    table.add_column("Summary")
+    for v in result.vulnerabilities:
+        ident = v.cve_id or v.vuln_id
+        kev = "YES" if v.in_kev else "—"
+        epss = f"{v.epss_score * 100:.1f}%" if v.epss_score is not None else "—"
+        fix = ", ".join(v.fixed_versions[:2]) or "—"
+        summ = v.summary[:100] + ("..." if len(v.summary) > 100 else "")
+        table.add_row(v.package, v.version, ident, v.priority, v.severity, kev, epss, fix, summ)
     _emit_tables([table], console=console, out_file=out_file, stdout=stdout)
 
 
@@ -183,6 +253,52 @@ def render_scope_entries(
             status,
         )
     _emit_tables([table], console=console, out_file=out_file, stdout=stdout)
+
+
+def render_scope_import(
+    result: ScopeImportResult,
+    *,
+    fmt: str,
+    console: Console,
+    out_file: Path | None = None,
+    stdout: TextIO | None = None,
+) -> None:
+    """Render `s1shell scope import` summary."""
+    norm = _require_format(fmt, ("table", "json", "md"), command="scope import")
+    if norm == "json":
+        write_or_print(dumps_json(result), out_file=out_file, stdout=stdout)
+        return
+    mode_tag = "DRY-RUN" if result.dry_run else "APPLIED"
+    if norm == "md":
+        lines = [
+            f"# Scope Import ({mode_tag}): `{result.source}`",
+            "",
+            (
+                f"- **Added:** {len(result.added)} | **Skipped (duplicates):** "
+                f"{len(result.skipped)} | **Errors:** {len(result.errors)}"
+            ),
+        ]
+        if result.added:
+            lines.extend(["", "| ID | Target | Type | Rule |", "|---|---|---|---|"])
+            for e in result.added:
+                rule = "EXCLUDE" if e.exclude else "ALLOW"
+                lines.append(f"| `{e.id}` | `{_md_cell(e.target)}` | {e.type} | {rule} |")
+        if result.errors:
+            lines.extend(["", "## Errors", ""])
+            for err in result.errors:
+                lines.append(f"- {err}")
+        write_or_print("\n".join(lines), out_file=out_file, stdout=stdout)
+        return
+
+    tbl = Table(title=f"Scope Import ({mode_tag}): {result.source}")
+    tbl.add_column("Metric", style="cyan", no_wrap=True)
+    tbl.add_column("Value")
+    tbl.add_row("Added", str(len(result.added)))
+    tbl.add_row("Skipped (active duplicates)", str(len(result.skipped)))
+    tbl.add_row("Errors", str(len(result.errors)))
+    if result.errors:
+        tbl.add_row("Error Details", "\n".join(result.errors[:10]))
+    _emit_tables([tbl], console=console, out_file=out_file, stdout=stdout)
 
 
 def render_scope_check(
@@ -246,6 +362,11 @@ def render_profile_result(
         ]
         if result.protocol.redirect_location:
             lines.append(f"- **Redirect (not followed):** `{result.protocol.redirect_location}`")
+        if result.protocol.methods_checked:
+            lines.append(
+                f"- **HTTP Methods (`OPTIONS`):** "
+                f"`{', '.join(result.protocol.allowed_methods) or 'none'}`"
+            )
         lines.append(
             f"- **DNS:** A=`{', '.join(result.dns.a) or 'none'}`, "
             f"AAAA=`{', '.join(result.dns.aaaa) or 'none'}`, "
@@ -259,6 +380,8 @@ def render_profile_result(
                 f"Verified={result.tls.verified}, Expires={result.tls.not_after} "
                 f"({result.tls.days_remaining} days)"
             )
+            if result.tls.spki_sha256:
+                lines.append(f"- **SPKI SHA-256 Pin:** `{result.tls.spki_sha256}`")
             if result.tls.supported_versions:
                 lines.append(
                     f"- **Supported TLS Versions:** `{', '.join(result.tls.supported_versions)}`"
@@ -298,6 +421,11 @@ def render_profile_result(
     summary.add_row("HTTP/3 Advertised", "Yes" if result.protocol.http3_advertised else "No")
     if result.protocol.redirect_location:
         summary.add_row("Redirect (not followed)", result.protocol.redirect_location)
+    if result.protocol.methods_checked:
+        meth_str = ", ".join(result.protocol.allowed_methods) or "none advertised"
+        if result.protocol.risky_methods:
+            meth_str += f" [RISKY: {', '.join(result.protocol.risky_methods)}]"
+        summary.add_row("HTTP Methods", meth_str)
     summary.add_row(
         "DNS",
         f"A={', '.join(result.dns.a) or 'none'} | "
@@ -320,6 +448,8 @@ def render_profile_result(
             summary.add_row("TLS Issuer", result.tls.issuer)
         if result.tls.supported_versions:
             summary.add_row("TLS Versions", ", ".join(result.tls.supported_versions))
+        if result.tls.spki_sha256:
+            summary.add_row("TLS SPKI Pin", result.tls.spki_sha256)
     tables.append(summary)
 
     headers_tbl = Table(title="Security Headers")
@@ -572,12 +702,60 @@ def render_ai_analysis(
     table = Table(title=f"S1shell AI Analysis ({result.provider} / {result.model})")
     table.add_column("Field", style="cyan", no_wrap=True)
     table.add_column("Value")
-    table.add_row("Mode / Redacted", f"{result.mode} (redacted={'yes' if result.redacted else 'no'})")
+    red_label = "yes" if result.redacted else "no"
+    table.add_row("Mode / Redacted", f"{result.mode} (redacted={red_label})")
     table.add_row("Task", result.task)
     table.add_row("Artifacts", ", ".join(result.input_artifacts) or "none")
     table.add_row("Tokens", f"in={result.input_tokens}, out={result.output_tokens}")
     table.add_row("Analysis", result.analysis)
     _emit_tables([table], console=console, out_file=out_file, stdout=stdout)
+
+
+def render_remediation_plan(
+    plan: RemediationPlan,
+    *,
+    fmt: str,
+    console: Console,
+    out_file: Path | None = None,
+    stdout: TextIO | None = None,
+) -> None:
+    """Render deterministic offline hardening playbook in `table`, `json`, or `md`."""
+    norm = _require_format(fmt, ("table", "json", "md"), command="remediate")
+    if norm == "json":
+        write_or_print(dumps_json(plan), out_file=out_file, stdout=stdout)
+        return
+    if norm == "md":
+        lines = [
+            f"# S1shell Hardening Playbook: {plan.target}",
+            "",
+            f"- **Selected Stack:** `{plan.selected_stack}`",
+            f"- **Detected Stacks:** `{', '.join(plan.detected_stacks) or 'generic'}`",
+        ]
+        for snip in plan.snippets:
+            lines.extend(
+                [
+                    "",
+                    f"## {snip.title} (`{', '.join(snip.finding_ids)}`)",
+                    "",
+                    f"```{snip.language}",
+                    snip.config,
+                    "```",
+                ]
+            )
+        if not plan.snippets:
+            lines.extend(["", "_No hardening snippets required for the active findings._"])
+        write_or_print("\n".join(lines), out_file=out_file, stdout=stdout)
+        return
+
+    tbl = Table(
+        title=f"Deterministic Hardening Playbook: {plan.target} (stack={plan.selected_stack})"
+    )
+    tbl.add_column("Section", style="cyan")
+    tbl.add_column("Finding IDs")
+    tbl.add_column("Recommended Configuration")
+    for snip in plan.snippets:
+        tbl.add_row(snip.title, ", ".join(snip.finding_ids), snip.config)
+    _emit_tables([tbl], console=console, out_file=out_file, stdout=stdout)
 
 
 def render_assessment_result(
@@ -625,7 +803,7 @@ def render_assessment_result(
         lines = [
             f"# S1shell Assessment: {result.url}",
             "",
-            f"- **Pinned IP:** `{result.pinned_ip}`",
+            f"- **Pinned IP:** `{result.pinned_ip}` | **Preset:** `{result.preset}`",
             f"- **Scope Ref:** `{result.auth_ref}` (`{result.scope_id}`)",
             (
                 f"- **Posture Score:** `{result.posture.score}/100` "
@@ -637,12 +815,13 @@ def render_assessment_result(
             "",
             "## Prioritized Findings",
             "",
-            "| ID | Severity | Category | Title | Evidence | Remediation |",
-            "|---|---|---|---|---|---|",
+            "| ID | Severity | Category | OWASP / NIST | Title | Evidence | Remediation |",
+            "|---|---|---|---|---|---|---|",
         ]
         for finding in result.findings:
+            comp = f"{finding.owasp or '—'} / {finding.nist or '—'}"
             lines.append(
-                f"| `{finding.id}` | {finding.severity} | {finding.category} | "
+                f"| `{finding.id}` | {finding.severity} | {finding.category} | `{comp}` | "
                 f"{_md_cell(finding.title)} | {_md_cell(finding.evidence)} | "
                 f"{_md_cell(finding.remediation)} |"
             )
@@ -659,7 +838,7 @@ def render_assessment_result(
     summary = Table(title=f"Assessment Posture Summary: {result.url} ({result.pinned_ip})")
     summary.add_column("Metric", style="cyan", no_wrap=True)
     summary.add_column("Value")
-    summary.add_row("Scope Ref", f"{result.auth_ref} ({result.scope_id})")
+    summary.add_row("Scope Ref", f"{result.auth_ref} ({result.scope_id}) | preset={result.preset}")
     summary.add_row(
         "Posture Score",
         (
@@ -668,6 +847,8 @@ def render_assessment_result(
         ),
     )
     summary.add_row("Findings", counts_str)
+    if result.suppressed_findings:
+        summary.add_row("Suppressed", str(len(result.suppressed_findings)))
     summary.add_row("Detected Stack", stack_summary or "none")
     summary.add_row("Correlated CVEs", str(cve_count))
     if result.saved_files:
@@ -766,10 +947,22 @@ def render_assessment_diff(
         lines = [
             f"# S1shell Posture Drift Diff (`regressed={result.regressed}`)",
             "",
-            f"- **Baseline:** `{result.baseline_url}` (`{result.score_before}/100`, Grade `{result.grade_before}`)",
-            f"- **Current:** `{result.current_url}` (`{result.score_after}/100`, Grade `{result.grade_after}`)",
-            f"- **Score Delta:** `{delta_str}` | Risk: `{result.risk_before}` -> `{result.risk_after}`",
-            f"- **New Findings:** {len(result.new_findings)} | **Resolved:** {len(result.resolved_findings)} | **Persisting:** {result.persisting_count}",
+            (
+                f"- **Baseline:** `{result.baseline_url}` "
+                f"(`{result.score_before}/100`, Grade `{result.grade_before}`)"
+            ),
+            (
+                f"- **Current:** `{result.current_url}` "
+                f"(`{result.score_after}/100`, Grade `{result.grade_after}`)"
+            ),
+            (
+                f"- **Score Delta:** `{delta_str}` | Risk: "
+                f"`{result.risk_before}` -> `{result.risk_after}`"
+            ),
+            (
+                f"- **Findings:** new={len(result.new_findings)}, "
+                f"resolved={len(result.resolved_findings)}, persisting={result.persisting_count}"
+            ),
         ]
         if result.new_cves:
             lines.append(f"- **New CVEs:** `{', '.join(result.new_cves)}`")
@@ -780,7 +973,9 @@ def render_assessment_diff(
             for f in result.new_findings:
                 lines.append(f"| `{f['id']}` | {f['severity']} | {_md_cell(f['title'])} |")
         if result.resolved_findings:
-            lines.extend(["", "## Resolved Findings", "", "| ID | Severity | Title |", "|---|---|---|"])
+            lines.extend(
+                ["", "## Resolved Findings", "", "| ID | Severity | Title |", "|---|---|---|"]
+            )
             for f in result.resolved_findings:
                 lines.append(f"| `{f['id']}` | {f['severity']} | {_md_cell(f['title'])} |")
         write_or_print("\n".join(lines), out_file=out_file, stdout=stdout)
@@ -839,46 +1034,60 @@ def render_batch_assessment(
     console: Console,
     out_file: Path | None = None,
     stdout: TextIO | None = None,
+    report_service: ReportService | None = None,
+    operator: str | None = None,
 ) -> None:
-    """Render sequential multi-target batch assessment summary."""
-    norm = _require_format(fmt, ("table", "json", "md"), command="assess --targets-file")
+    """Render sequential multi-target batch assessment summary (`table`, `json`, `md`, `html`)."""
+    norm = _require_format(fmt, ("table", "json", "md", "html"), command="assess --targets-file")
     if norm == "json":
         write_or_print(dumps_json(result), out_file=out_file, stdout=stdout)
         return
+    if norm == "html":
+        rep_svc = (
+            report_service
+            if report_service is not None
+            else ReportService(RuntimeConfig.from_env())
+        )
+        write_or_print(
+            rep_svc.render_batch_html(result, operator=operator),
+            out_file=out_file,
+            stdout=stdout,
+        )
+        return
+    avg_disp = result.average_score if result.average_score is not None else "—"
     if norm == "md":
         lines = [
             "# S1shell Batch Assessment Summary",
             "",
             (
                 f"- **Targets:** {result.targets_total} "
-                f"(succeeded={result.succeeded}, blocked={result.blocked}, errored={result.errored})"
+                f"(ok={result.succeeded}, blocked={result.blocked}, err={result.errored})"
             ),
-            f"- **Average Score:** {result.average_score if result.average_score is not None else '—'}",
+            f"- **Average Score:** {avg_disp}",
             "",
-            "| Target | Status | Score | Grade | Risk | Findings | CVEs | Error |",
-            "|---|---|---|---|---|---|---|---|",
+            "| Target | Status | Score | Grade | Risk | High Sev | Findings | CVEs | Error |",
+            "|---|---|---|---|---|---|---|---|---|",
         ]
         for item in result.results:
             lines.append(
                 f"| `{_md_cell(item.target)}` | {item.status} | "
                 f"{item.score if item.score is not None else '—'} | "
                 f"{item.grade or '—'} | {item.risk_level or '—'} | "
+                f"{item.highest_severity or '—'} | "
                 f"{item.finding_count} | {item.cve_count} | {_md_cell(item.error)} |"
             )
         write_or_print("\n".join(lines), out_file=out_file, stdout=stdout)
         return
 
     tbl = Table(
-        title=(
-            f"Batch Assessment ({result.succeeded}/{result.targets_total} ok, "
-            f"avg={result.average_score if result.average_score is not None else '—'})"
-        )
+        title=f"Batch Assessment ({result.succeeded}/{result.targets_total} ok, avg={avg_disp})"
     )
     tbl.add_column("Target", style="cyan")
     tbl.add_column("Status")
     tbl.add_column("Score", justify="right")
     tbl.add_column("Grade")
     tbl.add_column("Risk")
+    tbl.add_column("High Sev")
     tbl.add_column("Findings", justify="right")
     tbl.add_column("CVEs", justify="right")
     tbl.add_column("Error")
@@ -889,6 +1098,7 @@ def render_batch_assessment(
             str(item.score) if item.score is not None else "—",
             item.grade or "—",
             item.risk_level or "—",
+            item.highest_severity or "—",
             str(item.finding_count),
             str(item.cve_count),
             item.error or "—",

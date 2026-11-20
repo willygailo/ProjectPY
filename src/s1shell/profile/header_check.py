@@ -1,4 +1,4 @@
-"""HTTP security header, directive-level CSP, CORS, banner, and cookie analysis."""
+"""HTTP security header, directive-level CSP, CORS, cache, banner, and cookie analysis."""
 
 from __future__ import annotations
 
@@ -18,6 +18,28 @@ _BANNER_HEADERS = (
     "X-AspNetMvc-Version",
     "X-Generator",
     "Via",
+    "X-Runtime",
+    "X-Version",
+    "X-Backend-Server",
+    "X-Upstream",
+    "Server-Timing",
+)
+
+_DEBUG_HEADERS = (
+    "X-Debug-Token",
+    "X-Debug-Token-Link",
+    "X-Symfony-Cache",
+    "X-Laravel-Debug",
+    "X-Clockwork-Id",
+    "X-Drupal-Cache-Tags",
+)
+
+_CSP_JSONP_CDN_HOSTS = (
+    "ajax.googleapis.com",
+    "cdnjs.cloudflare.com",
+    "cdn.jsdelivr.net",
+    "unpkg.com",
+    "raw.githubusercontent.com",
 )
 
 _MAX_AGE_RE = re.compile(r"max-age\s*=\s*(\d+)", re.IGNORECASE)
@@ -203,14 +225,24 @@ def _evaluate_csp(
     if "http:" in script_low:
         weak_reasons.append("script-src allows http:")
 
+    if not modern_controls:
+        broad_cdns = [cdn for cdn in _CSP_JSONP_CDN_HOSTS if any(cdn in src for src in script_low)]
+        if broad_cdns:
+            weak_reasons.append(f"broad script CDN allowlist ({', '.join(broad_cdns[:2])})")
+
     default_low = [t.lower() for t in directives.get("default-src", [])]
     if "*" in default_low and "wildcard '*'" not in weak_reasons:
         weak_reasons.append("wildcard '*'")
 
     obj_sources = directives.get("object-src", directives.get("default-src", []))
-    if obj_sources and "'none'" not in [t.lower() for t in obj_sources] and "object-src" not in directives:
-        if "*" in [t.lower() for t in obj_sources]:
-            weak_reasons.append("unrestricted object-src")
+    obj_low = [t.lower() for t in obj_sources]
+    if (
+        obj_sources
+        and "'none'" not in obj_low
+        and "object-src" not in directives
+        and "*" in obj_low
+    ):
+        weak_reasons.append("unrestricted object-src")
 
     if weak_reasons:
         return (
@@ -267,8 +299,36 @@ def _evaluate_cors(header_multi: dict[str, list[str]]) -> list[str]:
     return issues
 
 
+def _evaluate_cache(
+    header_map: dict[str, str],
+    cookies: list[CookieFinding],
+) -> tuple[str | None, list[str]]:
+    cc = header_map.get("cache-control")
+    cc_low = (cc or "").lower()
+    has_sensitive_state = any(c.is_session_like for c in cookies) or (
+        "www-authenticate" in header_map
+    )
+    issues: list[str] = []
+    if has_sensitive_state:
+        if not cc:
+            issues.append(
+                "Response sets session/auth headers without `Cache-Control: no-store` or `private`."
+            )
+        elif "public" in cc_low:
+            issues.append(
+                "Response sets session/auth headers with `Cache-Control: public` "
+                "(shared cache leakage risk)."
+            )
+        elif "no-store" not in cc_low and "private" not in cc_low:
+            issues.append(
+                "Response sets session/auth headers without `no-store` or `private` in "
+                "`Cache-Control`."
+            )
+    return cc, issues
+
+
 def analyze_headers(headers: list[tuple[str, str]], *, is_https: bool) -> HeaderAnalysis:
-    """Evaluate defensive headers, CSP directives, CORS, banners, and cookie attributes."""
+    """Evaluate defensive headers, CSP directives, CORS, cache, banners, debug, and cookies."""
     header_map: dict[str, str] = {}
     header_multi: dict[str, list[str]] = {}
     cookies: list[CookieFinding] = []
@@ -432,6 +492,17 @@ def analyze_headers(headers: list[tuple[str, str]], *, is_https: bool) -> Header
                 seen_banners.add((banner_name, cleaned))
                 banners.append(BannerDisclosure(header=banner_name, value=cleaned))
 
+    debug_hdrs: list[BannerDisclosure] = []
+    seen_debug: set[tuple[str, str]] = set()
+    for dbg_name in _DEBUG_HEADERS:
+        for raw_val in header_multi.get(dbg_name.lower(), []):
+            cleaned = raw_val.strip()
+            if cleaned and (dbg_name, cleaned) not in seen_debug:
+                seen_debug.add((dbg_name, cleaned))
+                debug_hdrs.append(BannerDisclosure(header=dbg_name, value=cleaned))
+
+    cache_control, cache_issues = _evaluate_cache(header_map, cookies)
+
     return HeaderAnalysis(
         security_headers=findings,
         banner_disclosures=banners,
@@ -439,4 +510,7 @@ def analyze_headers(headers: list[tuple[str, str]], *, is_https: bool) -> Header
         csp_directives=csp_directives,
         csp_report_only=csp_report_only,
         cors_issues=_evaluate_cors(header_multi),
+        cache_control=cache_control,
+        cache_issues=cache_issues,
+        debug_headers=debug_hdrs,
     )

@@ -4,16 +4,21 @@ from __future__ import annotations
 
 from s1shell.errors import ValidationError
 
-_MODULES = "scope cve profile fingerprint report audit doctor completion ai assess diff mcp"
+_MODULES = (
+    "scope cve profile fingerprint report audit doctor completion ai assess diff remediate mcp"
+)
 _COMMON_FLAGS = "--format --out --verbose --no-color --authorized --scope-file --home --help"
 _OUTCOMES = "success blocked_out_of_scope blocked_unauthorized error"
 _SCOPE_FLAGS = (
-    f"--owner --ref --expires --include-subdomains --exclude --notes --replace --prune {_COMMON_FLAGS}"
+    "--owner --ref --expires --include-subdomains --exclude --notes "
+    f"--replace --prune --dry-run {_COMMON_FLAGS}"
 )
 _CVE_FLAGS = (
-    "--keyword --cpe --from-fingerprint --min-cvss --severity "
-    f"--published-after --published-before --limit --enrich --kev-only --refresh --offline clear {_COMMON_FLAGS}"
+    "--keyword --cpe --from-fingerprint --min-cvss --severity --fail-on "
+    "--published-after --published-before --limit --enrich --kev-only "
+    f"--refresh --offline clear {_COMMON_FLAGS}"
 )
+_PROFILE_FLAGS = f"--tls-versions --dns-security --well-known --check-methods {_COMMON_FLAGS}"
 _REPORT_FLAGS = f"--input --profile --fingerprint --cve --operator {_COMMON_FLAGS}"
 _AUDIT_FLAGS = f"--limit --category --outcome --command --target {_COMMON_FLAGS}"
 _AI_FLAGS = (
@@ -22,9 +27,11 @@ _AI_FLAGS = (
 )
 _ASSESS_FLAGS = (
     "--targets-file --delay --no-tls-versions --no-dns-security --well-known "
+    "--check-methods --preset --ignore-finding --no-remediate "
     "--skip-cve --enrich-cve --min-cvss --cve-limit --offline --ai --ai-provider "
     f"--ai-mode --redact --fail-on --min-score --operator --out-dir {_COMMON_FLAGS}"
 )
+_REMEDIATE_FLAGS = f"--stack {_COMMON_FLAGS}"
 _FILE_FLAGS = (
     "--out|--scope-file|--from-profile|--from-fingerprint|--input|"
     "--profile|--fingerprint|--cve|--env-file|--targets-file"
@@ -43,6 +50,14 @@ _s1shell_completions() {{
             ;;
         --severity|--fail-on)
             COMPREPLY=( $(compgen -W "LOW MEDIUM HIGH CRITICAL" -- "${{cur}}") )
+            return 0
+            ;;
+        --preset)
+            COMPREPLY=( $(compgen -W "web api strict" -- "${{cur}}") )
+            return 0
+            ;;
+        --stack)
+            COMPREPLY=( $(compgen -W "auto nginx apache caddy express generic" -- "${{cur}}") )
             return 0
             ;;
         --provider|--ai-provider)
@@ -76,20 +91,20 @@ _s1shell_completions() {{
     case "${{mod}}" in
         scope)
             if [[ ${{COMP_CWORD}} -eq 2 ]]; then
-                COMPREPLY=( $(compgen -W "add list check remove expire" -- "${{cur}}") )
+                COMPREPLY=( $(compgen -W "add import list check remove expire" -- "${{cur}}") )
             else
                 COMPREPLY=( $(compgen -W "{_SCOPE_FLAGS}" -- "${{cur}}") )
             fi
             ;;
         cve)
             if [[ ${{COMP_CWORD}} -eq 2 ]]; then
-                COMPREPLY=( $(compgen -W "search get cache" -- "${{cur}}") )
+                COMPREPLY=( $(compgen -W "search get audit cache" -- "${{cur}}") )
             else
                 COMPREPLY=( $(compgen -W "{_CVE_FLAGS}" -- "${{cur}}") )
             fi
             ;;
         profile)
-            COMPREPLY=( $(compgen -W "--tls-versions --dns-security --well-known {_COMMON_FLAGS}" -- "${{cur}}") )
+            COMPREPLY=( $(compgen -W "{_PROFILE_FLAGS}" -- "${{cur}}") )
             ;;
         fingerprint)
             COMPREPLY=( $(compgen -W "--from-profile {_COMMON_FLAGS}" -- "${{cur}}") )
@@ -124,6 +139,9 @@ _s1shell_completions() {{
         diff)
             COMPREPLY=( $(compgen -W "--fail-on-regression {_COMMON_FLAGS}" -- "${{cur}}") )
             ;;
+        remediate)
+            COMPREPLY=( $(compgen -W "{_REMEDIATE_FLAGS}" -- "${{cur}}") )
+            ;;
         mcp)
             if [[ ${{COMP_CWORD}} -eq 2 ]]; then
                 COMPREPLY=( $(compgen -W "serve" -- "${{cur}}") )
@@ -145,10 +163,10 @@ _ZSH_COMPLETION = """#compdef s1shell
 _s1shell() {
     local -a modules
     modules=(
-        'scope:Manage authorized target scope and exclusions'
-        'cve:Research CVEs via NVD, CVE.org, CISA KEV, and FIRST EPSS'
+        'scope:Manage authorized target scope, exclusions, and bulk imports'
+        'cve:Research CVEs via NVD, CVE.org, OSV.dev, CISA KEV, and FIRST EPSS'
         'profile:Read-only DNS/TLS/HTTP/HTML profiling'
-        'fingerprint:Passive software, CDN, and WAF identification'
+        'fingerprint:Passive software, CDN, WAF, and JS library identification'
         'report:Compile CVE, profile, fingerprint, and assess reports'
         'audit:Inspect and verify tamper-evident audit log'
         'doctor:Verify local environment and permissions'
@@ -156,6 +174,7 @@ _s1shell() {
         'ai:Manage AI providers (.env) and run defensive analysis'
         'assess:All-in-one authorized target or batch assessment pipeline'
         'diff:Compare baseline vs current assessment artifacts'
+        'remediate:Generate offline deterministic hardening config snippets'
         'mcp:Run read-only offline/intel MCP stdio server'
     )
 
@@ -181,6 +200,7 @@ _s1shell() {
                     local -a subcmds
                     subcmds=(
                         'add:Add scope or exclusion entry'
+                        'import:Bulk-import scope entries from file'
                         'list:List entries'
                         'check:Check target'
                         'remove:Remove entry'
@@ -192,7 +212,8 @@ _s1shell() {
                     local -a subcmds
                     subcmds=(
                         'search:Search NVD'
-                        'get:Fetch CVE ID'
+                        'get:Fetch one or more CVE IDs'
+                        'audit:Audit lockfile or CycloneDX SBOM via OSV.dev'
                         'cache:Manage local CVE cache'
                     )
                     _describe 'cve command' subcmds
@@ -237,20 +258,21 @@ _s1shell "$@"
 _FISH_COMPLETION = """# fish completion for s1shell
 complete -c s1shell -f
 complete -c s1shell -n "__fish_use_subcommand" -a "scope" -d "Manage authorized target scope"
-complete -c s1shell -n "__fish_use_subcommand" -a "cve" -d "Research CVEs via NVD, CVE.org, KEV, EPSS"
-complete -c s1shell -n "__fish_use_subcommand" -a "profile" -d "Read-only DNS/TLS/HTTP/HTML profiling"
+complete -c s1shell -n "__fish_use_subcommand" -a "cve" -d "CVE & SBOM intelligence (NVD/OSV)"
+complete -c s1shell -n "__fish_use_subcommand" -a "profile" -d "Read-only target profiling"
 complete -c s1shell -n "__fish_use_subcommand" -a "fingerprint" -d "Passive stack matching"
 complete -c s1shell -n "__fish_use_subcommand" -a "report" -d "Compile assessment reports"
 complete -c s1shell -n "__fish_use_subcommand" -a "audit" -d "Inspect and verify audit log"
 complete -c s1shell -n "__fish_use_subcommand" -a "doctor" -d "Run local diagnostics"
 complete -c s1shell -n "__fish_use_subcommand" -a "completion" -d "Generate shell completion"
 complete -c s1shell -n "__fish_use_subcommand" -a "ai" -d "AI providers and defensive analysis"
-complete -c s1shell -n "__fish_use_subcommand" -a "assess" -d "All-in-one or batch assessment pipeline"
-complete -c s1shell -n "__fish_use_subcommand" -a "diff" -d "Compare baseline vs current assessment"
+complete -c s1shell -n "__fish_use_subcommand" -a "assess" -d "Single or batch target assessment"
+complete -c s1shell -n "__fish_use_subcommand" -a "diff" -d "Compare baseline vs current assess"
+complete -c s1shell -n "__fish_use_subcommand" -a "remediate" -d "Offline hardening config playbook"
 complete -c s1shell -n "__fish_use_subcommand" -a "mcp" -d "Read-only offline MCP stdio server"
 
-complete -c s1shell -n "__fish_seen_subcommand_from scope" -a "add list check remove expire"
-complete -c s1shell -n "__fish_seen_subcommand_from cve" -a "search get cache"
+complete -c s1shell -n "__fish_seen_subcommand_from scope" -a "add import list check remove expire"
+complete -c s1shell -n "__fish_seen_subcommand_from cve" -a "search get audit cache"
 complete -c s1shell -n "__fish_seen_subcommand_from report" -a "build"
 complete -c s1shell -n "__fish_seen_subcommand_from audit" -a "list verify"
 complete -c s1shell -n "__fish_seen_subcommand_from completion" -a "bash zsh fish"
@@ -258,6 +280,8 @@ complete -c s1shell -n "__fish_seen_subcommand_from ai" -a "env analyze"
 complete -c s1shell -n "__fish_seen_subcommand_from mcp" -a "serve"
 
 complete -c s1shell -l format -x -a "table json md html sarif"
+complete -c s1shell -l preset -x -a "web api strict"
+complete -c s1shell -l stack -x -a "auto nginx apache caddy express generic"
 complete -c s1shell -l out -r
 complete -c s1shell -l scope-file -r
 complete -c s1shell -l home -r

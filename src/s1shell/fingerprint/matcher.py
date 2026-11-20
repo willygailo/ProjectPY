@@ -97,22 +97,27 @@ def match_signatures(
     html_analysis: HTMLPassiveAnalysis | dict[str, Any] | None = None,
     signatures: list[dict[str, Any]] | None = None,
 ) -> list[FingerprintMatch]:
-    """Passively match headers, cookies, TLS issuer, CNAMEs, and HTML hints against local rules."""
+    """Passively match headers, cookies, TLS issuer, CNAMEs, HTML hints, and JS libraries."""
     rules = signatures if signatures is not None else load_signatures()
     cookie_names = _extract_cookie_names(headers)
     cname_list = [str(c).strip().rstrip(".") for c in (cnames or []) if str(c).strip()]
 
     meta_gen: str | None = None
     html_hints: list[str] = []
+    html_libs: list[str] = []
     if isinstance(html_analysis, HTMLPassiveAnalysis):
         meta_gen = html_analysis.meta_generator
         html_hints = list(html_analysis.framework_hints)
+        html_libs = list(html_analysis.detected_libraries)
     elif isinstance(html_analysis, dict):
         raw_mg = html_analysis.get("meta_generator")
         meta_gen = str(raw_mg) if raw_mg else None
         raw_hints = html_analysis.get("framework_hints", [])
         if isinstance(raw_hints, list):
             html_hints = [str(h) for h in raw_hints if h]
+        raw_libs = html_analysis.get("detected_libraries", [])
+        if isinstance(raw_libs, list):
+            html_libs = [str(lib) for lib in raw_libs if lib]
 
     lowered_headers: dict[str, list[str]] = {}
     for k, v in headers:
@@ -173,6 +178,17 @@ def match_signatures(
                     evidence.append(f"html_hint:{obs}")
                     if detected_version is None and ":" in obs:
                         detected_version = obs.split(":", 1)[1].strip() or None
+
+        for expected_lib in rule.get("html_libraries", []):
+            lib_low = str(expected_lib).lower()
+            for obs_lib in html_libs:
+                if "/" not in obs_lib:
+                    continue
+                obs_name, obs_ver = obs_lib.split("/", 1)
+                if obs_name.lower() == lib_low:
+                    evidence.append(f"html_library:{obs_lib}")
+                    if detected_version is None and obs_ver.strip():
+                        detected_version = obs_ver.strip()
 
         if evidence:
             base_conf = str(rule.get("confidence", "medium"))

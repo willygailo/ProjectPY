@@ -253,10 +253,10 @@ class CVEService:
 
         combined_by_id: dict[str, CVERecord] = {}
         all_cached = True
-        for kw, cpe_str, version in queries:
+        for kw_q, cpe_str, version in queries:
             sub_res = self.search(
                 CVESearchFilter(
-                    keyword=kw,
+                    keyword=kw_q,
                     cpe=cpe_str,
                     min_cvss=filters.min_cvss,
                     severity=filters.severity,
@@ -385,6 +385,35 @@ class CVEService:
                 refresh=refresh,
             )
         return CVESearchResult(query={"cve_id": norm_id}, cached=cached, records=records)
+
+    def get_many(
+        self,
+        cve_ids: list[str],
+        *,
+        refresh: bool = False,
+        offline: bool = False,
+        enrich: bool = False,
+    ) -> CVESearchResult:
+        """Fetch and prioritize one or more specific CVE IDs in a single consolidated result."""
+        norm_ids = list(dict.fromkeys(validate_cve_id(cid) for cid in cve_ids))
+        if not norm_ids:
+            raise ValidationError("Provide at least one CVE ID.")
+        if len(norm_ids) == 1:
+            return self.get(norm_ids[0], refresh=refresh, offline=offline, enrich=enrich)
+
+        combined: dict[str, CVERecord] = {}
+        all_cached = True
+        for cid in norm_ids:
+            sub = self.get(cid, refresh=refresh, offline=offline, enrich=enrich)
+            all_cached = all_cached and sub.cached
+            for rec in sub.records:
+                combined[rec.cve_id] = rec
+        ordered = sorted(combined.values(), key=_sort_key, reverse=True)
+        return CVESearchResult(
+            query={"cve_ids": norm_ids, "enriched": enrich},
+            cached=all_cached,
+            records=ordered,
+        )
 
     def clear_cache(self) -> int:
         """Remove all cached CVE entries."""

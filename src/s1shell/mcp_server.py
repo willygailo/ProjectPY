@@ -9,8 +9,10 @@ from typing import Any, TextIO
 
 from s1shell import __version__
 from s1shell.assess.diff import diff_assessments
+from s1shell.assess.remediate import generate_remediation_from_file
 from s1shell.audit import AuditLogger
 from s1shell.config import RuntimeConfig
+from s1shell.cve.audit_deps import DependencyAuditService
 from s1shell.cve.models import CVESearchFilter
 from s1shell.cve.service import CVEService
 from s1shell.doctor import run_doctor
@@ -24,28 +26,42 @@ MCP_PROTOCOL_VERSION = "2024-11-05"
 TOOLS_SPEC: list[dict[str, Any]] = [
     {
         "name": "s1shell_doctor",
-        "description": "Run local diagnostics on S1shell environment, permissions, scope, and hash-chained audit log.",
+        "description": (
+            "Run local diagnostics on S1shell environment, permissions, scope, "
+            "and hash-chained audit log."
+        ),
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
         "name": "s1shell_scope_list",
-        "description": "List configured authorized scope and exclusion entries from scope.yaml (offline).",
+        "description": (
+            "List configured authorized scope and exclusion entries from scope.yaml (offline)."
+        ),
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
         "name": "s1shell_fingerprint_from_profile",
-        "description": "Passively identify technologies/CDNs/WAFs from a saved profile.json artifact (zero network traffic).",
+        "description": (
+            "Passively identify technologies/CDNs/WAFs from a saved profile.json "
+            "artifact (zero network traffic)."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
-                "profile_path": {"type": "string", "description": "Path to saved S1shell profile JSON artifact."}
+                "profile_path": {
+                    "type": "string",
+                    "description": "Path to saved S1shell profile JSON artifact.",
+                }
             },
             "required": ["profile_path"],
         },
     },
     {
         "name": "s1shell_cve_search",
-        "description": "Search NVD CVE intelligence by keyword or CPE with optional CISA KEV/EPSS enrichment (zero target contact).",
+        "description": (
+            "Search NVD CVE intelligence by keyword or CPE with optional CISA KEV/EPSS "
+            "enrichment (zero target contact)."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -62,7 +78,10 @@ TOOLS_SPEC: list[dict[str, Any]] = [
     },
     {
         "name": "s1shell_cve_get",
-        "description": "Retrieve detailed NVD + CVE.org intelligence for a specific CVE ID (zero target contact).",
+        "description": (
+            "Retrieve detailed NVD + CVE.org intelligence for a specific CVE ID "
+            "(zero target contact)."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -74,8 +93,28 @@ TOOLS_SPEC: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "s1shell_cve_audit",
+        "description": (
+            "Audit pinned lockfiles (requirements.txt, package-lock.json, go.mod, "
+            "Cargo.lock) or CycloneDX SBOMs via OSV.dev + KEV/EPSS (zero target contact)."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "file_path": {"type": "string"},
+                "offline": {"type": "boolean", "default": False},
+                "enrich": {"type": "boolean", "default": False},
+                "kev_only": {"type": "boolean", "default": False},
+            },
+            "required": ["file_path"],
+        },
+    },
+    {
         "name": "s1shell_assess_diff",
-        "description": "Compare baseline vs current assess.json artifacts to detect security posture drift (offline).",
+        "description": (
+            "Compare baseline vs current assess.json artifacts to detect security "
+            "posture drift (offline)."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -86,8 +125,29 @@ TOOLS_SPEC: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "s1shell_remediate",
+        "description": (
+            "Generate deterministic offline defensive hardening configuration snippets "
+            "from a saved assess.json artifact."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "assess_path": {"type": "string"},
+                "stack": {
+                    "type": "string",
+                    "enum": ["auto", "nginx", "apache", "caddy", "express", "generic"],
+                    "default": "auto",
+                },
+            },
+            "required": ["assess_path"],
+        },
+    },
+    {
         "name": "s1shell_audit_list",
-        "description": "Read recent append-only JSONL audit log entries with optional filters (offline).",
+        "description": (
+            "Read recent append-only JSONL audit log entries with optional filters (offline)."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -100,7 +160,9 @@ TOOLS_SPEC: list[dict[str, Any]] = [
     },
     {
         "name": "s1shell_audit_verify",
-        "description": "Verify SHA-256 hash chain integrity of S1shell's tamper-evident audit.log (offline).",
+        "description": (
+            "Verify SHA-256 hash chain integrity of S1shell's tamper-evident audit.log (offline)."
+        ),
         "inputSchema": {"type": "object", "properties": {}},
     },
 ]
@@ -114,6 +176,7 @@ class S1ShellMCPServer:
         cfg: RuntimeConfig,
         *,
         cve_service: CVEService | None = None,
+        dep_audit_service: DependencyAuditService | None = None,
         fingerprint_service: FingerprintService | None = None,
         scope_manager: ScopeManager | None = None,
         audit_logger: AuditLogger | None = None,
@@ -124,7 +187,14 @@ class S1ShellMCPServer:
         )
         self.audit_logger = audit_logger if audit_logger is not None else AuditLogger(cfg.audit_log)
         self.cve_service = (
-            cve_service if cve_service is not None else CVEService(cfg, audit_logger=self.audit_logger)
+            cve_service
+            if cve_service is not None
+            else CVEService(cfg, audit_logger=self.audit_logger)
+        )
+        self.dep_audit_service = (
+            dep_audit_service
+            if dep_audit_service is not None
+            else DependencyAuditService(cfg, audit_logger=self.audit_logger)
         )
         self.fingerprint_service = (
             fingerprint_service
@@ -169,10 +239,23 @@ class S1ShellMCPServer:
                 enrich=bool(arguments.get("enrich", False)),
             )
             return dumps_json(res)
+        if name == "s1shell_cve_audit":
+            fpath = Path(str(arguments.get("file_path", "")))
+            dep_res = self.dep_audit_service.audit_file(
+                fpath,
+                offline=bool(arguments.get("offline", False)),
+                enrich=bool(arguments.get("enrich", False)),
+                kev_only=bool(arguments.get("kev_only", False)),
+            )
+            return dumps_json(dep_res)
         if name == "s1shell_assess_diff":
             base = Path(str(arguments.get("baseline_path", "")))
             curr = Path(str(arguments.get("current_path", "")))
             return dumps_json(diff_assessments(base, curr))
+        if name == "s1shell_remediate":
+            assess_path = Path(str(arguments.get("assess_path", "")))
+            stack = str(arguments.get("stack") or "auto")
+            return dumps_json(generate_remediation_from_file(assess_path, stack=stack))
         if name == "s1shell_audit_list":
             events = self.audit_logger.read_recent(
                 limit=int(arguments.get("limit", 50)),

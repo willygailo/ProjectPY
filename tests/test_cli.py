@@ -159,8 +159,10 @@ def test_cli_cve_cache_clear_and_module_entrypoint(tmp_path: Path) -> None:
         env={"PYTHONPATH": str(Path(__file__).resolve().parents[1] / "src")},
         check=False,
     )
+    from s1shell import __version__
+
     assert proc.returncode == 0
-    assert "s1shell 0.1.0" in proc.stdout
+    assert f"s1shell {__version__}" in proc.stdout
 
 
 def test_cli_doctor_completion_audit_filters_and_format_validation(tmp_path: Path) -> None:

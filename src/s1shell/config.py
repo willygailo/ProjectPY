@@ -27,6 +27,7 @@ DEFAULT_CISA_KEV_URL = (
     "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
 )
 DEFAULT_EPSS_API_URL = "https://api.first.org/data/v1/epss"
+DEFAULT_OSV_API_URL = "https://api.osv.dev/v1/querybatch"
 SUPPORTED_AI_PROVIDERS = ("anthropic", "ollama", "openai_compat", "gemini")
 
 
@@ -130,6 +131,7 @@ class RuntimeConfig:
     gemini_api_url: str = DEFAULT_GEMINI_API_URL
     cisa_kev_url: str = DEFAULT_CISA_KEV_URL
     epss_api_url: str = DEFAULT_EPSS_API_URL
+    osv_api_url: str = DEFAULT_OSV_API_URL
 
     @classmethod
     def from_env(

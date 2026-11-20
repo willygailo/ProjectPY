@@ -12,11 +12,13 @@ from s1shell import __version__
 from s1shell.ai.client import SUPPORTED_AI_MODES
 from s1shell.ai.service import AIService
 from s1shell.assess.diff import diff_assessments
-from s1shell.assess.scorer import check_policy_gate
+from s1shell.assess.remediate import SUPPORTED_STACKS, generate_remediation_from_file
+from s1shell.assess.scorer import SUPPORTED_PRESETS, check_policy_gate
 from s1shell.assess.service import AssessService
 from s1shell.audit import AuditLogger
 from s1shell.completion import generate_completion
 from s1shell.config import SUPPORTED_AI_PROVIDERS, RuntimeConfig
+from s1shell.cve.audit_deps import DependencyAuditService
 from s1shell.cve.models import CVESearchFilter
 from s1shell.cve.service import CVEService
 from s1shell.doctor import run_doctor
@@ -34,16 +36,21 @@ from s1shell.output import (
     render_audit_verify,
     render_batch_assessment,
     render_cve_result,
+    render_dependency_audit,
     render_doctor_report,
     render_fingerprint_result,
     render_profile_result,
+    render_remediation_plan,
     render_scope_check,
     render_scope_entries,
+    render_scope_import,
     write_or_print,
 )
 from s1shell.profile.service import ProfileService
 from s1shell.report.service import ReportService
 from s1shell.scope import ScopeManager, parse_expiry
+
+_SEV_RANK = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
 
 
 def _shared_flags_parser() -> argparse.ArgumentParser:
@@ -102,8 +109,8 @@ def build_parser() -> argparse.ArgumentParser:
         prog="s1shell",
         parents=[common],
         description=(
-            "S1shell: Authorized CVE research, scoped target profiling, "
-            "passive fingerprinting, posture scoring, drift diffing, and reporting."
+            "S1shell: Authorized CVE/SBOM research, scoped target profiling, "
+            "passive fingerprinting, posture scoring, remediation playbooks, and reporting."
         ),
     )
     parser.add_argument("--version", action="version", version=f"s1shell {__version__}")
@@ -137,6 +144,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="Replace an existing active entry for the same target.",
     )
 
+    s_imp = scope_cmds.add_parser(
+        "import",
+        parents=[common],
+        help="Bulk-import newline-delimited targets (prefix `!` marks exclusions).",
+    )
+    s_imp.add_argument("file", type=Path, help="Path to scope target list file.")
+    s_imp.add_argument("--owner", required=True, help="System owner or client name.")
+    s_imp.add_argument("--ref", required=True, help="Ticket, contract, or SOW reference.")
+    s_imp.add_argument("--expires", required=True, help="Expiry date (YYYY-MM-DD or ISO-8601).")
+    s_imp.add_argument("--include-subdomains", action="store_true", help="Authorize subdomains.")
+    s_imp.add_argument("--exclude", action="store_true", help="Import all lines as exclusions.")
+    s_imp.add_argument("--notes", default=None, help="Optional authorization note.")
+    s_imp.add_argument("--replace", action="store_true", help="Replace matching active entries.")
+    s_imp.add_argument("--dry-run", action="store_true", help="Validate without writing scope.")
+
     scope_cmds.add_parser("list", parents=[common], help="List configured scope entries.")
 
     s_check = scope_cmds.add_parser("check", parents=[common], help="Check if target is in scope.")
@@ -151,7 +173,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     # --- cve ---
-    cve_p = modules.add_parser("cve", parents=[common], help="Research CVEs via NVD & CVE.org.")
+    cve_p = modules.add_parser(
+        "cve", parents=[common], help="Research CVEs & audit lockfiles/SBOMs (zero target contact)."
+    )
     cve_cmds = cve_p.add_subparsers(dest="command", required=True)
 
     c_search = cve_cmds.add_parser("search", parents=[common], help="Search CVEs by keyword/CPE.")
@@ -181,20 +205,45 @@ def build_parser() -> argparse.ArgumentParser:
     c_search.add_argument(
         "--kev-only",
         action="store_true",
-        help="Return only CVEs listed in CISA Known Exploited Vulnerabilities (implies --enrich).",
+        help="Return only CVEs listed in CISA KEV (implies --enrich).",
     )
     c_search.add_argument("--refresh", action="store_true", help="Bypass cache read.")
     c_search.add_argument("--offline", action="store_true", help="Read from local cache only.")
 
-    c_get = cve_cmds.add_parser("get", parents=[common], help="Look up a specific CVE ID.")
-    c_get.add_argument("cve_id", help="CVE identifier (e.g. CVE-2021-23017).")
+    c_get = cve_cmds.add_parser("get", parents=[common], help="Look up one or more CVE IDs.")
+    c_get.add_argument("cve_ids", nargs="+", help="One or more CVE IDs (e.g. CVE-2021-23017).")
     c_get.add_argument(
         "--enrich",
         action="store_true",
-        help="Enrich CVE record with CISA KEV and FIRST EPSS metadata.",
+        help="Enrich CVE record(s) with CISA KEV and FIRST EPSS metadata.",
     )
     c_get.add_argument("--refresh", action="store_true", help="Bypass cache read.")
     c_get.add_argument("--offline", action="store_true", help="Read from local cache only.")
+
+    c_audit = cve_cmds.add_parser(
+        "audit",
+        parents=[common],
+        help="Audit lockfile (requirements.txt/package-lock.json/go.mod/Cargo.lock) or CycloneDX.",
+    )
+    c_audit.add_argument("file", type=Path, help="Path to dependency lockfile or CycloneDX SBOM.")
+    c_audit.add_argument(
+        "--enrich",
+        action="store_true",
+        help="Enrich matched CVE aliases with CISA KEV & FIRST EPSS scores.",
+    )
+    c_audit.add_argument(
+        "--kev-only",
+        action="store_true",
+        help="Return only vulnerabilities listed in CISA KEV (implies --enrich).",
+    )
+    c_audit.add_argument(
+        "--fail-on",
+        choices=["CRITICAL", "HIGH", "MEDIUM", "LOW"],
+        default=None,
+        help="CI policy gate: exit code 4 if any dependency vulnerability meets/exceeds severity.",
+    )
+    c_audit.add_argument("--refresh", action="store_true", help="Bypass cache read.")
+    c_audit.add_argument("--offline", action="store_true", help="Read from local cache only.")
 
     c_cache = cve_cmds.add_parser("cache", parents=[common], help="Manage local CVE cache.")
     c_cache_cmds = c_cache.add_subparsers(dest="cache_cmd", required=True)
@@ -213,17 +262,22 @@ def build_parser() -> argparse.ArgumentParser:
     prof_p.add_argument(
         "--dns-security",
         action="store_true",
-        help="Also query passive DNS hygiene records (CAA, SPF, DMARC, DNSSEC, dangling CNAME).",
+        help="Also query passive DNS hygiene records (CAA, SPF, DMARC, MTA-STS, DNSSEC, MX/NS).",
     )
     prof_p.add_argument(
         "--well-known",
         action="store_true",
         help="Also perform read-only checks on /.well-known/security.txt and /robots.txt.",
     )
+    prof_p.add_argument(
+        "--check-methods",
+        action="store_true",
+        help="Also send 1 read-only OPTIONS request to inspect advertised Allow methods.",
+    )
 
     # --- fingerprint ---
     fp_p = modules.add_parser(
-        "fingerprint", parents=[common], help="Passive software, CDN, and WAF identification."
+        "fingerprint", parents=[common], help="Passive software, CDN, WAF, and JS lib detection."
     )
     fp_p.add_argument("target", nargs="?", default=None, help="Authorized target URL/domain/IP.")
     fp_p.add_argument(
@@ -413,6 +467,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="Seconds to pause between targets in --targets-file mode (default: 0.5).",
     )
     assess_p.add_argument(
+        "--preset",
+        choices=list(SUPPORTED_PRESETS),
+        default="web",
+        help="Posture scoring profile: web (default), api (skip HTML/frame noise), or strict.",
+    )
+    assess_p.add_argument(
+        "--ignore-finding",
+        dest="ignore_findings",
+        action="append",
+        default=[],
+        help="Waive/suppress a specific finding ID (repeatable, recorded transparently).",
+    )
+    assess_p.add_argument(
         "--no-tls-versions",
         action="store_true",
         help="Skip bounded TLS 1.0–1.3 protocol matrix check.",
@@ -420,12 +487,22 @@ def build_parser() -> argparse.ArgumentParser:
     assess_p.add_argument(
         "--no-dns-security",
         action="store_true",
-        help="Skip passive DNS hygiene queries (CAA/SPF/DMARC/DNSSEC/dangling CNAME).",
+        help="Skip passive DNS hygiene queries (CAA/SPF/DMARC/MTA-STS/DNSSEC/dangling CNAME).",
     )
     assess_p.add_argument(
         "--well-known",
         action="store_true",
         help="Also perform read-only checks on /.well-known/security.txt and /robots.txt.",
+    )
+    assess_p.add_argument(
+        "--check-methods",
+        action="store_true",
+        help="Also send 1 read-only OPTIONS request to inspect advertised HTTP methods.",
+    )
+    assess_p.add_argument(
+        "--no-remediate",
+        action="store_true",
+        help="Skip generating offline hardening config snippets in the assessment bundle.",
     )
     assess_p.add_argument(
         "--skip-cve",
@@ -514,6 +591,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="CI gate: exit code 4 if posture score dropped or new HIGH/CRITICAL/CVE appeared.",
     )
 
+    # --- remediate ---
+    rem_p = modules.add_parser(
+        "remediate",
+        parents=[common],
+        help="Generate deterministic offline hardening config snippets from assess.json.",
+    )
+    rem_p.add_argument("assess_file", type=Path, help="Path to saved S1shell assess.json.")
+    rem_p.add_argument(
+        "--stack",
+        choices=list(SUPPORTED_STACKS),
+        default="auto",
+        help="Target stack template (auto, nginx, apache, caddy, express, generic).",
+    )
+
     # --- mcp ---
     mcp_p = modules.add_parser(
         "mcp",
@@ -539,6 +630,7 @@ def dispatch(
     *,
     scope_manager: ScopeManager | None = None,
     cve_service: CVEService | None = None,
+    dep_audit_service: DependencyAuditService | None = None,
     profile_service: ProfileService | None = None,
     fingerprint_service: FingerprintService | None = None,
     report_service: ReportService | None = None,
@@ -583,6 +675,25 @@ def dispatch(
                 [entry], fmt=fmt, console=console, out_file=out_file, stdout=stdout
             )
             return int(ExitCode.SUCCESS)
+        if args.command == "import":
+            try:
+                raw_lines = args.file.read_text(encoding="utf-8").splitlines()
+            except OSError as exc:
+                raise ValidationError(f"Failed to read scope file '{args.file}': {exc}") from exc
+            imp_res = scope_mgr.import_targets(
+                raw_lines,
+                source=str(args.file),
+                owner=args.owner,
+                auth_ref=args.ref,
+                expires=args.expires,
+                include_subdomains=bool(args.include_subdomains),
+                notes=args.notes,
+                replace=bool(args.replace),
+                exclude=bool(args.exclude),
+                dry_run=bool(args.dry_run),
+            )
+            render_scope_import(imp_res, fmt=fmt, console=console, out_file=out_file, stdout=stdout)
+            return int(ExitCode.SUCCESS if not imp_res.errors else ExitCode.ERROR)
         if args.command == "list":
             render_scope_entries(
                 scope_mgr.load(), fmt=fmt, console=console, out_file=out_file, stdout=stdout
@@ -648,8 +759,8 @@ def dispatch(
             render_cve_result(cve_res, fmt=fmt, console=console, out_file=out_file, stdout=stdout)
             return int(ExitCode.SUCCESS)
         if args.command == "get":
-            cve_get_res = cve_svc.get(
-                args.cve_id,
+            cve_get_res = cve_svc.get_many(
+                list(args.cve_ids),
                 refresh=bool(args.refresh),
                 offline=bool(args.offline),
                 enrich=bool(args.enrich),
@@ -657,6 +768,36 @@ def dispatch(
             render_cve_result(
                 cve_get_res, fmt=fmt, console=console, out_file=out_file, stdout=stdout
             )
+            return int(ExitCode.SUCCESS)
+        if args.command == "audit":
+            dep_svc = (
+                dep_audit_service
+                if dep_audit_service is not None
+                else DependencyAuditService(cfg, audit_logger=audit_log)
+            )
+            dep_res = dep_svc.audit_file(
+                args.file,
+                offline=bool(args.offline),
+                refresh=bool(args.refresh),
+                enrich=bool(args.enrich or args.kev_only),
+                kev_only=bool(args.kev_only),
+            )
+            render_dependency_audit(
+                dep_res, fmt=fmt, console=console, out_file=out_file, stdout=stdout
+            )
+            if args.fail_on:
+                threshold = _SEV_RANK.get(args.fail_on.upper(), 99)
+                breaching = [
+                    v
+                    for v in dep_res.vulnerabilities
+                    if _SEV_RANK.get("CRITICAL" if v.in_kev else v.severity.upper(), 99)
+                    <= threshold
+                ]
+                if breaching:
+                    raise PolicyGateError(
+                        f"Dependency audit CI gate failed: {len(breaching)} vulnerability(ies) "
+                        f"at or above {args.fail_on}."
+                    )
             return int(ExitCode.SUCCESS)
         if args.command == "cache" and args.cache_cmd == "clear":
             cleared = cve_svc.clear_cache()
@@ -677,6 +818,8 @@ def dispatch(
             extra_kwargs["check_dns_security"] = True
         if args.well_known:
             extra_kwargs["check_well_known"] = True
+        if args.check_methods:
+            extra_kwargs["check_methods"] = True
         prof_res = prof_svc.profile(
             args.target,
             authorized=authorized,
@@ -732,9 +875,7 @@ def dispatch(
                 command=args.filter_command,
                 target=args.filter_target,
             )
-            render_audit_events(
-                events, fmt=fmt, console=console, out_file=out_file, stdout=stdout
-            )
+            render_audit_events(events, fmt=fmt, console=console, out_file=out_file, stdout=stdout)
             return int(ExitCode.SUCCESS)
         if args.command == "verify":
             verify_res = audit_log.verify()
@@ -805,6 +946,7 @@ def dispatch(
             if report_service is not None
             else ReportService(cfg, scope_manager=scope_mgr)
         )
+        ignored = {fid.strip() for fid in args.ignore_findings if fid.strip()}
         if args.targets_file is not None:
             if args.target:
                 raise ValidationError("Cannot combine a positional target with --targets-file.")
@@ -821,6 +963,7 @@ def dispatch(
                 check_tls_versions=not bool(args.no_tls_versions),
                 check_dns_security=not bool(args.no_dns_security),
                 check_well_known=bool(args.well_known),
+                check_methods=bool(args.check_methods),
                 skip_cve=bool(args.skip_cve),
                 enrich_cve=bool(args.enrich_cve),
                 min_cvss=args.min_cvss,
@@ -830,17 +973,39 @@ def dispatch(
                 ai_provider=args.ai_provider,
                 ai_mode=args.ai_mode,
                 ai_redact=bool(args.redact),
+                preset=args.preset,
+                ignore_findings=ignored or None,
                 operator=args.operator,
                 out_dir=args.out_dir,
             )
             render_batch_assessment(
-                batch_res, fmt=fmt, console=console, out_file=out_file, stdout=stdout
+                batch_res,
+                fmt=fmt,
+                console=console,
+                out_file=out_file,
+                stdout=stdout,
+                report_service=rep_svc,
+                operator=args.operator,
             )
+            if args.fail_on:
+                threshold = _SEV_RANK.get(args.fail_on.upper(), 99)
+                breached = [
+                    r.target
+                    for r in batch_res.results
+                    if r.highest_severity
+                    and _SEV_RANK.get(r.highest_severity.upper(), 99) <= threshold
+                ]
+                if breached:
+                    raise PolicyGateError(
+                        f"Batch CI policy gate failed: {len(breached)} target(s) met or exceeded "
+                        f"--fail-on {args.fail_on} ({', '.join(breached[:5])})."
+                    )
             if args.min_score is not None and (
                 batch_res.average_score is None or batch_res.average_score < args.min_score
             ):
                 raise PolicyGateError(
-                    f"Batch average score ({batch_res.average_score}) is below --min-score {args.min_score}."
+                    f"Batch average score ({batch_res.average_score}) is below "
+                    f"--min-score {args.min_score}."
                 )
             return int(ExitCode.SUCCESS)
 
@@ -853,6 +1018,7 @@ def dispatch(
             check_tls_versions=not bool(args.no_tls_versions),
             check_dns_security=not bool(args.no_dns_security),
             check_well_known=bool(args.well_known),
+            check_methods=bool(args.check_methods),
             skip_cve=bool(args.skip_cve),
             enrich_cve=bool(args.enrich_cve),
             min_cvss=args.min_cvss,
@@ -862,6 +1028,9 @@ def dispatch(
             ai_provider=args.ai_provider,
             ai_mode=args.ai_mode,
             ai_redact=bool(args.redact),
+            preset=args.preset,
+            ignore_findings=ignored or None,
+            include_remediation=not bool(args.no_remediate),
             operator=args.operator,
             out_dir=args.out_dir,
         )
@@ -895,10 +1064,17 @@ def dispatch(
             )
         return int(ExitCode.SUCCESS)
 
+    if args.module == "remediate":
+        fmt = str(_opt(args, "fmt", "md"))
+        plan = generate_remediation_from_file(args.assess_file, stack=args.stack)
+        render_remediation_plan(plan, fmt=fmt, console=console, out_file=out_file, stdout=stdout)
+        return int(ExitCode.SUCCESS)
+
     if args.module == "mcp" and args.command == "serve":
         mcp_srv = S1ShellMCPServer(
             cfg,
             cve_service=cve_service,
+            dep_audit_service=dep_audit_service,
             fingerprint_service=fingerprint_service,
             scope_manager=scope_mgr,
             audit_logger=audit_log,

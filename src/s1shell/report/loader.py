@@ -43,11 +43,12 @@ def _validate_artifact_structure(data: dict[str, Any], path: Path) -> None:
             )
     elif atype == "cve_report" and not isinstance(data.get("records"), list):
         raise ValidationError(f"CVE artifact '{path}' is missing required 'records' list.")
-    elif atype == "assess_report":
-        if not isinstance(data.get("profile"), dict) or not isinstance(data.get("posture"), dict):
-            raise ValidationError(
-                f"Assessment artifact '{path}' is missing required 'profile' or 'posture'."
-            )
+    elif atype == "assess_report" and (
+        not isinstance(data.get("profile"), dict) or not isinstance(data.get("posture"), dict)
+    ):
+        raise ValidationError(
+            f"Assessment artifact '{path}' is missing required 'profile' or 'posture'."
+        )
 
 
 def load_artifacts(
@@ -66,6 +67,7 @@ def load_artifacts(
     posture: dict[str, Any] | None = None
     findings: list[dict[str, Any]] = []
     ai_analysis: dict[str, Any] | None = None
+    remediation_snippets: list[dict[str, Any]] = []
 
     for path in inputs or []:
         data = _read_artifact_json(path)
@@ -90,6 +92,10 @@ def load_artifacts(
                 findings.extend(f for f in data["findings"] if isinstance(f, dict))
             if isinstance(data.get("ai_analysis"), dict):
                 ai_analysis = data["ai_analysis"]
+            if isinstance(data.get("remediation_snippets"), list):
+                remediation_snippets.extend(
+                    s for s in data["remediation_snippets"] if isinstance(s, dict)
+                )
         else:
             raise ValidationError(f"Unsupported artifact_type '{atype}' in '{path}'.")
 
@@ -154,5 +160,6 @@ def load_artifacts(
         posture=posture,
         findings=findings,
         ai_analysis=ai_analysis,
+        remediation_snippets=remediation_snippets,
         generated_at_utc=metadata.generated_at_utc,
     )

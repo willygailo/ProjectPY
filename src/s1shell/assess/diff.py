@@ -100,14 +100,10 @@ def diff_assessments(baseline_path: Path, current_path: Path) -> AssessmentDiffR
     days_before = _extract_cert_days(base)
     days_after = _extract_cert_days(curr)
     cert_delta = (
-        days_after - days_before
-        if days_before is not None and days_after is not None
-        else None
+        days_after - days_before if days_before is not None and days_after is not None else None
     )
 
-    new_high_crit = any(
-        curr_findings[fid]["severity"] in {"CRITICAL", "HIGH"} for fid in new_ids
-    )
+    new_high_crit = any(curr_findings[fid]["severity"] in {"CRITICAL", "HIGH"} for fid in new_ids)
     regressed = score_delta < 0 or new_high_crit or bool(new_cves)
 
     return AssessmentDiffResult(
