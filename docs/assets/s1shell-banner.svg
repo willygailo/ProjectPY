@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 300" width="1200" height="300" role="img" aria-label="S1shell — Authorized Defensive Security Assessment &amp; OSINT Toolkit">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0b1120"/>
+      <stop offset="55%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#0a1f2e"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#38bdf8"/>
+      <stop offset="50%" stop-color="#22d3ee"/>
+      <stop offset="100%" stop-color="#34d399"/>
+    </linearGradient>
+    <linearGradient id="shieldFill" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.22"/>
+      <stop offset="100%" stop-color="#34d399" stop-opacity="0.10"/>
+    </linearGradient>
+    <radialGradient id="glowLeft" cx="18%" cy="50%" r="35%">
+      <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.20"/>
+      <stop offset="100%" stop-color="#38bdf8" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowRight" cx="88%" cy="30%" r="32%">
+      <stop offset="0%" stop-color="#34d399" stop-opacity="0.16"/>
+      <stop offset="100%" stop-color="#34d399" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="grid" width="36" height="36" patternUnits="userSpaceOnUse">
+      <path d="M 36 0 L 0 0 0 36" fill="none" stroke="#1e293b" stroke-width="1" stroke-opacity="0.65"/>
+    </pattern>
+  </defs>
+
+  <!-- Canvas -->
+  <rect width="1200" height="300" rx="18" fill="url(#bg)"/>
+  <rect width="1200" height="300" rx="18" fill="url(#grid)"/>
+  <rect width="1200" height="300" rx="18" fill="url(#glowLeft)"/>
+  <rect width="1200" height="300" rx="18" fill="url(#glowRight)"/>
+  <rect x="1" y="1" width="1198" height="298" rx="17" fill="none" stroke="#1e293b" stroke-width="2"/>
+  <rect x="1" y="1" width="1198" height="4" rx="2" fill="url(#accent)"/>
+
+  <!-- Shield + Terminal Emblem -->
+  <g transform="translate(88, 62)">
+    <path d="M78 6 L146 32 L146 92 C146 134 117 166 78 180 C39 166 10 134 10 92 L10 32 Z"
+          fill="url(#shieldFill)" stroke="url(#accent)" stroke-width="3.5" stroke-linejoin="round"/>
+    <path d="M78 22 L131 42 L131 90 C131 124 108 150 78 162 C48 150 25 124 25 90 L25 42 Z"
+          fill="#0b1120" fill-opacity="0.72" stroke="#334155" stroke-width="1.5"/>
+    <!-- Terminal Prompt >_ -->
+    <path d="M51 74 L74 92 L51 110" fill="none" stroke="#38bdf8" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="82" y1="110" x2="108" y2="110" stroke="#34d399" stroke-width="7" stroke-linecap="round"/>
+  </g>
+
+  <!-- Wordmark & Tagline -->
+  <g transform="translate(278, 108)">
+    <text x="0" y="0" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif"
+          font-size="62" font-weight="800" letter-spacing="-1.5" fill="#f8fafc">S1shell</text>
+    <rect x="234" y="-40" width="84" height="30" rx="15" fill="#0ea5e9" fill-opacity="0.18" stroke="#38bdf8" stroke-width="1.2"/>
+    <text x="276" y="-20" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace"
+          font-size="14" font-weight="700" fill="#7dd3fc">v0.4.2</text>
+
+    <text x="2" y="38" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif"
+          font-size="21" font-weight="500" fill="#cbd5e1">
+      Authorized Defensive Security Assessment, OSINT &amp; AppSec CLI Toolkit
+    </text>
+    <text x="2" y="66" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace"
+          font-size="14.5" fill="#94a3b8">
+      Built for Kali Linux &amp; Linux · Fail-Closed Scope Gate · Read-Only Profiling · SARIF 2.1.0
+    </text>
+
+    <!-- Feature Pills -->
+    <g transform="translate(0, 92)">
+      <rect x="0" y="0" width="194" height="32" rx="16" fill="#0f172a" stroke="#38bdf8" stroke-opacity="0.55" stroke-width="1.2"/>
+      <circle cx="18" cy="16" r="4" fill="#38bdf8"/>
+      <text x="30" y="21" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12.5" font-weight="600" fill="#e2e8f0">Fail-Closed Scope Gate</text>
+
+      <rect x="208" y="0" width="188" height="32" rx="16" fill="#0f172a" stroke="#22d3ee" stroke-opacity="0.55" stroke-width="1.2"/>
+      <circle cx="226" cy="16" r="4" fill="#22d3ee"/>
+      <text x="238" y="21" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12.5" font-weight="600" fill="#e2e8f0">7-Feed Passive Intel</text>
+
+      <rect x="410" y="0" width="194" height="32" rx="16" fill="#0f172a" stroke="#34d399" stroke-opacity="0.55" stroke-width="1.2"/>
+      <circle cx="428" cy="16" r="4" fill="#34d399"/>
+      <text x="440" y="21" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12.5" font-weight="600" fill="#e2e8f0">19-Tool Read-Only MCP</text>
+
+      <rect x="618" y="0" width="184" height="32" rx="16" fill="#0f172a" stroke="#a78bfa" stroke-opacity="0.55" stroke-width="1.2"/>
+      <circle cx="636" cy="16" r="4" fill="#a78bfa"/>
+      <text x="648" y="21" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12.5" font-weight="600" fill="#e2e8f0">Offline Codec &amp; SBOM</text>
+    </g>
+  </g>
+</svg>
