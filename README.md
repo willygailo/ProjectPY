@@ -8,6 +8,7 @@
 <br />
 
 [![Version](https://img.shields.io/badge/Version-0.5.0-0ea5e9?style=for-the-badge)](CHANGELOG.md)
+[![Dev](https://img.shields.io/badge/Dev-Willy_Gailo_RVS-f59e0b?style=for-the-badge)](#top)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776ab?style=for-the-badge&logo=python&logoColor=white)](pyproject.toml)
 [![Platform](https://img.shields.io/badge/Kali_Linux-Linux-557c94?style=for-the-badge&logo=kalilinux&logoColor=white)](scripts/install-kali.sh)
 [![License: MIT](https://img.shields.io/badge/License-MIT-10b981?style=for-the-badge)](LICENSE)
@@ -64,8 +65,8 @@ flowchart LR
       Allow/deny (<code>--exclude</code>) rules for domains, IPs, CIDRs, URL prefixes, and <b>Tor v3 <code>.onion</code></b>, bulk import (<code>--dry-run</code>), DNS rebinding + private/CGNAT (<code>100.64.0.0/10</code>)/NAT64 (<code>64:ff9b::/96</code>)/IPv4-mapped IPv6/metadata guards, IP-pinned HTTP/TLS, atomic <code>0600</code> writes, and a file-locked (<code>fcntl.flock</code>) <code>O(1)</code> SHA-256 hash-chained <code>audit.log</code>.
     </td>
     <td width="50%" valign="top">
-      <h3>🔍 Deep Read-Only Target Profiling &amp; Entity Extraction</h3>
-      Recursive RFC 7208 <code>SPF</code> + void/loop checks, <code>DMARC</code>/<code>MTA-STS</code>/<code>TLS-RPT</code>/<code>BIMI</code>/<code>DANE TLSA</code>/<code>DNSSEC</code>/dangling CNAME, full X.509 cert chains + Subject/Serial/SPKI pin, CSP v2/CORS/HSTS/cookies, plus zero-extra-packet extraction of <b>Names/Organizations (<code>meta</code> + <code>JSON-LD</code>), Emails &amp; <code>[Gmail]</code> contacts, Phone numbers (<code>+63</code>/PH/intl), Exposed Keys &amp; Client/App IDs (GA4, GTM, Firebase, Stripe, OAuth, reCAPTCHA, GCP/AWS/GitHub/OpenAI/Telegram, JWTs), Social links, Cloud buckets, and API paths</b>.
+      <h3>🔍 Deep Pentest Target Profiling &amp; Entity Extraction</h3>
+      Recursive RFC 7208 <code>SPF</code> + void/loop checks, <code>DMARC</code>/<code>MTA-STS</code>/<code>TLS-RPT</code>/<code>BIMI</code>/<code>DANE TLSA</code>/<code>DNSSEC</code>/33-provider CNAME takeover checks, full X.509 cert chains + Subject/Serial/SPKI pin, CSP v2/CORS/HSTS/cookies, plus zero-extra-packet extraction of <b>Names/Organizations (<code>meta</code> + <code>JSON-LD</code>), Emails &amp; <code>[Gmail]</code> contacts, Phone numbers (<code>+63</code>/PH/intl), Exposed Keys &amp; Client/App IDs (GA4, GTM, Firebase, Stripe, OAuth, reCAPTCHA, GCP/AWS/GitHub/OpenAI/Telegram/Slack/Discord/Twilio/SendGrid/Mailgun, JWTs), Form Actions &amp; High-Interest Input Parameters (<code>redirect_uri*</code>, <code>file*</code>, <code>id*</code>, <code>token*</code>), Internal IPs &amp; Dev Comments, Social links, Cloud buckets, and API paths</b>.
     </td>
   </tr>
   <tr>
@@ -196,7 +197,11 @@ make check</code></pre>
 ### 1.2 Verify Your Setup
 
 ```bash
-s1shell --version         # expected: s1shell 0.5.0
+s1shell --version         # expected: s1shell 0.5.0 (Dev: Willy Gailo RVS)
+s1shell --check           # live local diagnostics (doctor) + complete CLI usage guide
+s1shell help              # CLI overview, all modules, workflows, flags, & exit codes
+s1shell help assess       # detailed options & copy-paste examples for any module
+s1shell help --all        # complete CLI reference manual (supports --format md --out GUIDE.md)
 s1shell doctor            # expected: healthy=True, 35 scope entries, 81 signatures, 9 AI skills
 s1shell scope list        # expected: 35 active TLD & localhost rules (.com, .ph, .com.ph, .gov.ph, ...)
 s1shell ai skills list    # expected: 9 bundled defensive AI skills
@@ -507,6 +512,10 @@ Target Identity, Contacts (Email / Gmail / Phone) & Surface Entities: https://ww
 │                            │ https://www.linkedin.com/company/target-org     │
 │ Cloud Buckets & API Paths  │ cloud:https://target-assets.s3.amazonaws.com,   │
 │                            │ /api/v2/users/profile                           │
+│ Forms & Input Parameters   │ POST /auth/login [params: user*, password*,     │
+│                            │ redirect_uri*]                                  │
+│ Internal IPs & Dev Comments│ comment:TODO: remove staging endpoint,          │
+│                            │ internal:10.24.0.15                             │
 └────────────────────────────┴─────────────────────────────────────────────────┘
 ```
 
@@ -723,11 +732,12 @@ s1shell codec hash --file ./results/target-com/report.html
 ### Phase 5 — Remediation Playbooks, Defensive AI Skills, Reporting & Re-Test Drift
 
 <details>
-<summary><b>🧠 9 Built-In Defensive AI Skills (<code>s1shell ai skills list</code> + custom <code>~/.s1shell/skills.d/*.yaml</code>)</b></summary>
+<summary><b>🧠 10 Built-In AI Skills (<code>s1shell ai skills list</code> + custom <code>~/.s1shell/skills.d/*.yaml</code>)</b></summary>
 
-| Skill ID (`--skill`) | Category | Defensive Focus |
+| Skill ID (`--skill`) | Category | Focus |
 | --- | --- | --- |
-| `attack-path-modeling` | Threat Modeling | Maps posture gaps, EOL software, and CVEs to MITRE ATT&CK paths, blast radius, and chokepoint defenses |
+| `attack-path-modeling` | Threat Modeling | Chains observed primitives (keys/IDs, buckets, CNAMEs, form params, JWT/OIDC, EOL/KEV CVEs) into cost-ordered MITRE ATT&CK paths with `Confirmed`/`Likely` confidence & D3FEND counters |
+| `ptes-ops-chain` | Pentest Ops | Terse, command-first operator brief mapping recon entities (emails/Gmail, keys/IDs, forms, internal IPs, CT/RDAP) and findings to ATT&CK (`TA0043`/`TA0001`/`TA0006`), OWASP WSTG v4.2, CVSS+EPSS, & D3FEND |
 | `pentest-report-writer` | Reporting | Formal pentest findings with Business Impact, Root Cause, Evidence, CVSS/CWE/OWASP/ASVS, and Remediation |
 | `threat-intel-correlator` | OSINT | Cross-correlates CT SANs, RDAP, VirusTotal, GreyNoise, urlscan.io, and profile data for shadow assets & drift |
 | `sbom-supply-chain` | Supply Chain | Prioritizes OSV.dev lockfile & CycloneDX/SPDX SBOM vulnerabilities via KEV, EPSS, and safe patch groupings |
@@ -848,7 +858,8 @@ s1shell audit verify
 | `s1shell audit list \| verify` | None (offline) | Inspect & verify SHA-256 hash chain integrity of `audit.log` |
 | `s1shell mcp serve \| config \| ping` | Online HTTP / Stdio (intel + AI; opt-in scoped targets) | Online Streamable HTTP & local stdio MCP server (23–26 tools, Resources, Prompts, Bearer auth, Origin guard), client config generator, & live ping |
 | `s1shell tor status \| check` | Offline (`status`) / Tor exit check (`check`) | Check local Tor SOCKS5h readiness or verify live Tor exit egress (fail-closed) |
-| `s1shell doctor` / `s1shell completion {bash,zsh,fish}` | None (offline) | Local environment diagnostics & shell tab-completion |
+| `s1shell doctor` / `s1shell --check` / `s1shell help [module] [--all]` | None (offline) | Local environment diagnostics, complete CLI usage guide & module manual |
+| `s1shell completion {bash,zsh,fish}` | None (offline) | Shell tab-completion scripts |
 
 </details>
 
@@ -869,7 +880,9 @@ s1shell audit verify
 | `--tor-proxy URL` | Custom local loopback Tor `socks5h://` proxy URL (default `socks5h://127.0.0.1:9050`) |
 | `--no-color` | Disable ANSI colors in terminal tables |
 | `--verbose` | Print full tracebacks to stderr on unexpected errors |
-| `--version` | Show installed `s1shell` version |
+| `--check` | Run local readiness diagnostics (`doctor`) + show the complete CLI usage guide |
+| `-h`, `--help` / `--help-all` | Show CLI usage guide (`--help`) or complete full manual (`--help-all`) |
+| `-V`, `--version` | Show installed `s1shell` version & developer credit (`Dev: Willy Gailo RVS`) |
 
 #### Exit Codes
 
@@ -898,6 +911,6 @@ s1shell audit verify
 
 <br />
 
-<sub>Built with care for authorized defensive security assessments · MIT License · <a href="#top">↑ Back to Top</a></sub>
+<sub>Dev: Willy Gailo RVS · Built with care for authorized defensive security assessments · MIT License · <a href="#top">↑ Back to Top</a></sub>
 
 </div>

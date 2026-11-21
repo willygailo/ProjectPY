@@ -24,6 +24,8 @@ DEFAULT_OPENAI_API_URL = "https://api.openai.com/v1/chat/completions"
 DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
 DEFAULT_GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
+DEFAULT_BUILTIN_API_URL = "local://s1shell-tactical-v1"
+DEFAULT_BUILTIN_MODEL = "s1shell-tactical-v1"
 DEFAULT_CISA_KEV_URL = (
     "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
 )
@@ -37,7 +39,7 @@ DEFAULT_CRTSH_API_URL = "https://crt.sh/"
 DEFAULT_RDAP_BASE_URL = "https://rdap.org"
 DEFAULT_TOR_SOCKS_URL = "socks5h://127.0.0.1:9050"
 DEFAULT_TOR_DOH_URL = "https://cloudflare-dns.com/dns-query"
-SUPPORTED_AI_PROVIDERS = ("anthropic", "ollama", "openai_compat", "gemini")
+SUPPORTED_AI_PROVIDERS = ("anthropic", "ollama", "openai_compat", "gemini", "builtin")
 
 
 def parse_dotenv(text: str) -> dict[str, str]:
@@ -307,6 +309,8 @@ class RuntimeConfig:
         if prov == "gemini":
             url, _ = self.get_env_var("GEMINI_API_URL")
             return url or self.gemini_api_url
+        if prov == "builtin":
+            return DEFAULT_BUILTIN_API_URL
         return self.anthropic_api_url
 
     def get_ai_api_key(self, provider: str | None = None) -> tuple[str | None, str]:
@@ -320,6 +324,8 @@ class RuntimeConfig:
             return self.get_env_var("GEMINI_API_KEY")
         if prov == "ollama":
             return self.get_env_var("OLLAMA_API_KEY")
+        if prov == "builtin":
+            return None, "builtin"
         return None, "unset"
 
     def get_ai_model(self, provider: str | None = None) -> str:
@@ -336,6 +342,9 @@ class RuntimeConfig:
         if prov == "gemini":
             model, _ = self.get_env_var("GEMINI_MODEL")
             return model or DEFAULT_GEMINI_MODEL
+        if prov == "builtin":
+            model, _ = self.get_env_var("BUILTIN_MODEL")
+            return model or DEFAULT_BUILTIN_MODEL
         return self.get_anthropic_model()
 
     @property

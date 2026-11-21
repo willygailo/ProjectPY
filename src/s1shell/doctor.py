@@ -7,7 +7,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from s1shell import __version__
+from s1shell import __developer__, __version__
 from s1shell.ai.skills import load_skills
 from s1shell.audit import AuditLogger
 from s1shell.config import RuntimeConfig, classify_anthropic_key, mask_api_key
@@ -37,6 +37,7 @@ class DoctorReport:
     healthy: bool = True
     schema_version: str = SCHEMA_VERSION
     tool_version: str = __version__
+    developer: str = __developer__
     generated_at_utc: str = field(default_factory=utc_now_iso)
     artifact_type: str = "doctor_report"
 

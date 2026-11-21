@@ -433,6 +433,26 @@ def _append_profile_entity_markdown(
             f"- **Cloud Buckets & API Endpoints:** "
             f"{', '.join(f'`{_md_cell(ep)}`' for ep in html.cloud_and_api_endpoints[:15])}"
         )
+    if html and html.form_endpoints:
+        lines.append(
+            f"- **Forms & Input Parameters (`*` = high-interest):** "
+            f"{'; '.join(f'`{_md_cell(fe)}`' for fe in html.form_endpoints[:12])}"
+        )
+    if html and html.internal_leaks_and_comments:
+        lines.append(
+            f"- **Internal IPs / Hostnames & Dev Comments:** "
+            f"{'; '.join(f'`{_md_cell(lk)}`' for lk in html.internal_leaks_and_comments[:12])}"
+        )
+    if result.dns.cname or result.dns.dangling_cnames:
+        dangling_note = (
+            f" [DANGLING TAKEOVER: {', '.join(result.dns.dangling_cnames)}]"
+            if result.dns.dangling_cnames
+            else ""
+        )
+        lines.append(
+            f"- **DNS CNAME / Cloud Target:** "
+            f"`{', '.join(result.dns.cname) or 'none'}`{dangling_note}"
+        )
     if tls and tls.applicable and tls.sans:
         lines.append(f"- **TLS Certificate SANs:** `{', '.join(tls.sans[:15])}`")
 
@@ -578,6 +598,26 @@ def _build_profile_entity_tables(
         entity_tbl.add_row(
             "Cloud Buckets & API Paths",
             ", ".join(html.cloud_and_api_endpoints[:15]),
+        )
+    if html and html.form_endpoints:
+        entity_tbl.add_row(
+            "Forms & Input Parameters",
+            "\n".join(html.form_endpoints[:12]),
+        )
+    if html and html.internal_leaks_and_comments:
+        entity_tbl.add_row(
+            "Internal IPs & Dev Comments",
+            "\n".join(html.internal_leaks_and_comments[:12]),
+        )
+    if result.dns.cname or result.dns.dangling_cnames:
+        dangling_txt = (
+            f" [DANGLING TAKEOVER: {', '.join(result.dns.dangling_cnames)}]"
+            if result.dns.dangling_cnames
+            else ""
+        )
+        entity_tbl.add_row(
+            "CNAME / Cloud Target",
+            f"{', '.join(result.dns.cname) or 'none'}{dangling_txt}",
         )
     if html and html.third_party_origins:
         entity_tbl.add_row(
@@ -882,7 +922,7 @@ def render_doctor_report(
         return
     if norm == "md":
         lines = [
-            f"# S1shell Doctor (`healthy={report.healthy}`)",
+            f"# S1shell Doctor (`healthy={report.healthy}` · Dev: {report.developer})",
             "",
             "| Check | Status | Detail |",
             "|---|---|---|",
@@ -892,7 +932,12 @@ def render_doctor_report(
         write_or_print("\n".join(lines), out_file=out_file, stdout=stdout)
         return
 
-    table = Table(title=f"S1shell Doctor (home={report.home_dir}, healthy={report.healthy})")
+    table = Table(
+        title=(
+            f"S1shell Doctor (home={report.home_dir}, healthy={report.healthy}, "
+            f"Dev: {report.developer})"
+        )
+    )
     table.add_column("Check", style="cyan", no_wrap=True)
     table.add_column("Status")
     table.add_column("Detail")
@@ -1220,6 +1265,41 @@ def render_remediation_plan(
     _emit_tables([tbl], console=console, out_file=out_file, stdout=stdout)
 
 
+def _attck_and_confidence(finding_id: str, category: str) -> tuple[str, str]:
+    """Return `(MITRE ATT&CK Tactic/Technique ID, Confidence)` for an assessment finding."""
+    fid = finding_id.upper()
+    if fid == "LEAK-SECRET":
+        return "TA0006 T1552.001", "Confirmed"
+    if fid in {"LEAK-JWT", "OIDC-001", "JWKS-PRIV", "JWKS-WEAK"}:
+        return "TA0006 T1606.002", "Confirmed"
+    if fid in {"CVE-KEV", "CVE-VER", "EOL-001"}:
+        return "TA0001 T1190", "Confirmed"
+    if fid == "CVE-UNVER":
+        return "TA0001 T1190", "Unconfirmed"
+    if fid == "HTML-009":
+        return "TA0001 T1190 / WSTG-INPV", "Confirmed"
+    if fid in {"HTML-010", "LEAK-SOURCEMAP", "LEAK-TRACE"}:
+        return "TA0043 T1592.002", "Confirmed"
+    if fid == "DNS-001":
+        return "TA0042 T1584.001", "Likely"
+    if fid == "METH-001":
+        return "TA0043 T1595.002", "Confirmed"
+    cat_map = {
+        "dns": ("TA0043 T1590.002", "Confirmed"),
+        "tls": ("TA0006 T1557", "Confirmed"),
+        "transport": ("TA0006 T1557", "Confirmed"),
+        "cookies": ("TA0006 T1539", "Confirmed"),
+        "cors": ("TA0009 T1185", "Confirmed"),
+        "headers": ("TA0043 T1592.002", "Confirmed"),
+        "html": ("TA0001 T1189", "Confirmed"),
+        "well_known": ("TA0043 T1592.004", "Confirmed"),
+        "disclosure": ("TA0043 T1592.002", "Confirmed"),
+        "intel": ("TA0043 T1596", "Confirmed"),
+        "cve": ("TA0001 T1190", "Likely"),
+    }
+    return cat_map.get(category.lower(), ("TA0043 T1592", "Confirmed"))
+
+
 def render_assessment_result(
     result: AssessmentResult,
     *,
@@ -1275,15 +1355,19 @@ def render_assessment_result(
             f"- **Detected Stack:** {stack_summary or 'none'}",
             f"- **Correlated CVEs:** {cve_count}",
             "",
-            "## Prioritized Findings",
+            "## Prioritized Findings (MITRE ATT&CK / OWASP / NIST)",
             "",
-            "| ID | Severity | Category | OWASP / NIST | Title | Evidence | Remediation |",
-            "|---|---|---|---|---|---|---|",
+            (
+                "| ID | Severity | Confidence | ATT&CK | OWASP / NIST | "
+                "Title | Evidence | Remediation |"
+            ),
+            "|---|---|---|---|---|---|---|---|",
         ]
         for finding in result.findings:
             comp = f"{finding.owasp or '—'} / {finding.nist or '—'}"
+            attck_id, conf = _attck_and_confidence(finding.id, finding.category)
             lines.append(
-                f"| `{finding.id}` | {finding.severity} | {finding.category} | `{comp}` | "
+                f"| `{finding.id}` | {finding.severity} | `{conf}` | `{attck_id}` | `{comp}` | "
                 f"{_md_cell(finding.title)} | {_md_cell(finding.evidence)} | "
                 f"{_md_cell(finding.remediation)} |"
             )
@@ -1319,18 +1403,19 @@ def render_assessment_result(
     tables.append(summary)
     tables.extend(_build_profile_entity_tables(result.profile, intel=result.intel))
 
-    findings_tbl = Table(title="Prioritized Pentester Findings & Remediation")
+    findings_tbl = Table(title="Prioritized Pentester Findings (MITRE ATT&CK & Remediation)")
     findings_tbl.add_column("ID", style="cyan", no_wrap=True)
     findings_tbl.add_column("Severity", no_wrap=True)
-    findings_tbl.add_column("Category", no_wrap=True)
+    findings_tbl.add_column("ATT&CK / Conf", no_wrap=True)
     findings_tbl.add_column("Title")
     findings_tbl.add_column("Evidence")
     findings_tbl.add_column("Remediation")
     for finding in result.findings:
+        attck_id, conf = _attck_and_confidence(finding.id, finding.category)
         findings_tbl.add_row(
             finding.id,
             finding.severity,
-            finding.category,
+            f"{attck_id}\n({conf})",
             finding.title,
             finding.evidence,
             finding.remediation,
@@ -1756,6 +1841,50 @@ def render_ghsa_advisories(
     _emit_tables([tbl], console=console, out_file=out_file, stdout=stdout)
 
 
+_HIGH_INTEREST_SUBDOMAIN_TOKENS = (
+    "admin",
+    "api",
+    "dev",
+    "staging",
+    "stage",
+    "test",
+    "uat",
+    "beta",
+    "vpn",
+    "mail",
+    "webmail",
+    "portal",
+    "auth",
+    "sso",
+    "login",
+    "internal",
+    "intranet",
+    "corp",
+    "jenkins",
+    "gitlab",
+    "git",
+    "grafana",
+    "kibana",
+    "prometheus",
+    "db",
+    "console",
+    "dashboard",
+)
+
+
+def _filter_high_interest_subdomains(subdomains: list[str]) -> list[str]:
+    out: list[str] = []
+    for sub in subdomains:
+        labels = sub.lower().split(".")
+        if any(
+            tok == lbl or lbl.startswith(f"{tok}-") or lbl.endswith(f"-{tok}")
+            for lbl in labels[:-2]
+            for tok in _HIGH_INTEREST_SUBDOMAIN_TOKENS
+        ):
+            out.append(sub)
+    return out
+
+
 def render_ct_lookup(
     result: CTLookupResult,
     *,
@@ -1769,6 +1898,7 @@ def render_ct_lookup(
     if norm == "json":
         write_or_print(dumps_json(result), out_file=out_file, stdout=stdout)
         return
+    high_interest = _filter_high_interest_subdomains(result.unique_subdomains)
     if norm == "md":
         lines = [
             f"# Passive Certificate Transparency: `{result.domain}` (cached={result.cached})",
@@ -1781,6 +1911,10 @@ def render_ct_lookup(
             f"- **Wildcard SANs:** `{', '.join(result.wildcard_sans[:10]) or 'none'}`",
             f"- **Observed CAs:** `{', '.join(result.issuers[:6]) or 'none'}`",
         ]
+        if high_interest:
+            lines.append(
+                f"- **High-Interest Pentest Subdomains:** `{', '.join(high_interest[:20])}`"
+            )
         if result.exported_candidates_file:
             lines.append(f"- **Exported Scope Candidates:** `{result.exported_candidates_file}`")
         if result.unique_subdomains:
@@ -1801,6 +1935,8 @@ def render_ct_lookup(
         f"cached={result.cached})",
     )
     summary.add_row("Unique Subdomains", str(len(result.unique_subdomains)))
+    if high_interest:
+        summary.add_row("High-Interest Targets", ", ".join(high_interest[:15]))
     summary.add_row("Wildcard SANs", ", ".join(result.wildcard_sans[:8]) or "none")
     summary.add_row("Issuers", ", ".join(result.issuers[:4]) or "none")
     if result.exported_candidates_file:

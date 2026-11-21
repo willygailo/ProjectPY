@@ -177,6 +177,8 @@ class HTMLPassiveAnalysis:
     identities_and_names: list[dict[str, str]] = field(default_factory=list)
     social_links: list[str] = field(default_factory=list)
     cloud_and_api_endpoints: list[str] = field(default_factory=list)
+    form_endpoints: list[str] = field(default_factory=list)
+    internal_leaks_and_comments: list[str] = field(default_factory=list)
     source_maps: list[str] = field(default_factory=list)
     stack_traces: list[str] = field(default_factory=list)
 

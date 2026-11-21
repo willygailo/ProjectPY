@@ -6,7 +6,7 @@ from s1shell.errors import ValidationError
 
 _MODULES = (
     "scope cve intel codec profile fingerprint report audit doctor completion ai assess diff "
-    "remediate mcp tor"
+    "remediate mcp tor help check"
 )
 _COMMON_FLAGS = (
     "--format --out --verbose --no-color --authorized --scope-file --home "
@@ -57,6 +57,8 @@ _REMEDIATE_FLAGS = f"--stack {_COMMON_FLAGS}"
 _CODEC_FLAGS = (
     f"--encoding -e --chain --file --shift --all-shifts --max-depth --raw --algos {_COMMON_FLAGS}"
 )
+_AI_PROVIDERS = "anthropic ollama openai_compat gemini builtin"
+_ROOT_COMPLETIONS = f"{_MODULES} --check --help-all --version -V --help -h"
 _FILE_FLAGS = (
     "--out|--scope-file|--from-profile|--from-fingerprint|--input|"
     "--profile|--fingerprint|--cve|--env-file|--targets-file|--export-candidates|--file"
@@ -86,7 +88,7 @@ _s1shell_completions() {{
             return 0
             ;;
         --provider|--ai-provider)
-            COMPREPLY=( $(compgen -W "anthropic ollama openai_compat gemini" -- "${{cur}}") )
+            COMPREPLY=( $(compgen -W "{_AI_PROVIDERS}" -- "${{cur}}") )
             return 0
             ;;
         --mode|--ai-mode)
@@ -116,7 +118,7 @@ _s1shell_completions() {{
     esac
 
     if [[ ${{COMP_CWORD}} -eq 1 ]]; then
-        COMPREPLY=( $(compgen -W "{_MODULES} --version --help" -- "${{cur}}") )
+        COMPREPLY=( $(compgen -W "{_ROOT_COMPLETIONS}" -- "${{cur}}") )
         return 0
     fi
 
@@ -205,6 +207,13 @@ _s1shell_completions() {{
                 COMPREPLY=( $(compgen -W "{_COMMON_FLAGS}" -- "${{cur}}") )
             fi
             ;;
+        help)
+            if [[ ${{COMP_CWORD}} -eq 2 ]]; then
+                COMPREPLY=( $(compgen -W "{_MODULES} --all" -- "${{cur}}") )
+            else
+                COMPREPLY=( $(compgen -W "--all {_COMMON_FLAGS}" -- "${{cur}}") )
+            fi
+            ;;
         *)
             COMPREPLY=( $(compgen -W "{_COMMON_FLAGS}" -- "${{cur}}") )
             ;;
@@ -235,10 +244,14 @@ _s1shell() {
         'remediate:Generate offline deterministic hardening config snippets'
         'mcp:Run online Streamable HTTP or local stdio read-only MCP server'
         'tor:Check local Tor SOCKS5h readiness or verify Tor exit egress'
+        'help:Show full CLI usage guide or detailed help for one module'
+        'check:Run local readiness check (doctor) and full CLI usage guide'
     )
 
     _arguments -C \\
-        '--version[Show s1shell version]' \\
+        '--check[Run local readiness check and show full CLI usage guide]' \\
+        '--help-all[Show complete CLI manual for every module and subcommand]' \\
+        '(-V --version)'{-V,--version}'[Show s1shell version and developer credit]' \\
         '--format[Output format]:format:(table json md html sarif)' \\
         '--out[Output file]:file:_files' \\
         '--verbose[Enable verbose diagnostics]' \\
@@ -368,6 +381,12 @@ complete -c s1shell -n "__fish_use_subcommand" -a "diff" -d "Compare baseline vs
 complete -c s1shell -n "__fish_use_subcommand" -a "remediate" -d "Offline hardening config playbook"
 complete -c s1shell -n "__fish_use_subcommand" -a "mcp" -d "Online HTTP or local stdio MCP server"
 complete -c s1shell -n "__fish_use_subcommand" -a "tor" -d "Tor SOCKS5h readiness and exit check"
+complete -c s1shell -n "__fish_use_subcommand" -a "help" -d "Full CLI usage guide and module manual"
+complete -c s1shell -n "__fish_use_subcommand" -a "check" -d "Local diagnostics + full CLI guide"
+
+complete -c s1shell -l check -d "Run local readiness check + show full CLI usage guide"
+complete -c s1shell -l help-all -d "Show complete manual for all modules and subcommands"
+complete -c s1shell -s V -l version -d "Show s1shell version and developer credit"
 
 complete -c s1shell -n "__fish_seen_subcommand_from scope" -a "add import list check remove expire"
 complete -c s1shell -n "__fish_seen_subcommand_from cve" -a "search get audit cache"

@@ -45,6 +45,9 @@ def _distill_profile(prof: dict[str, Any]) -> dict[str, Any]:
             "key_size": tls.get("key_size"),
             "signature_algorithm": tls.get("signature_algorithm"),
             "is_self_signed": tls.get("is_self_signed"),
+            "has_wildcard_san": tls.get("has_wildcard_san"),
+            "sans": (tls.get("sans") or [])[:12],
+            "spki_sha256": tls.get("spki_sha256"),
             "chain_length": tls.get("chain_length"),
             "chain_issues": tls.get("chain_issues", []),
         }
@@ -95,6 +98,7 @@ def _distill_profile(prof: dict[str, Any]) -> dict[str, Any]:
         ][:12]
         out["headers"] = {
             "non_ok_security_headers": non_ok,
+            "csp_directives": headers.get("csp_directives", {}),
             "banner_disclosures": headers.get("banner_disclosures", [])[:12],
             "debug_headers": headers.get("debug_headers", [])[:10],
             "cors_issues": headers.get("cors_issues", []),
@@ -111,6 +115,15 @@ def _distill_profile(prof: dict[str, Any]) -> dict[str, Any]:
             "mixed_content_count": len(html.get("mixed_content_urls", [])),
             "scripts_without_sri_count": len(html.get("external_scripts_without_sri", [])),
             "insecure_forms": html.get("insecure_forms", [])[:8],
+            "forms": html.get("forms", [])[:10],
+            "url_params": html.get("url_params", [])[:20],
+            "emails": html.get("emails", [])[:15],
+            "gmail_addresses": html.get("gmail_addresses", [])[:10],
+            "phone_numbers": html.get("phone_numbers", [])[:10],
+            "client_keys": html.get("client_keys", [])[:12],
+            "cloud_buckets": html.get("cloud_buckets", [])[:10],
+            "internal_ips": html.get("internal_ips", [])[:10],
+            "html_comments": html.get("html_comments", [])[:10],
             "leaked_secrets": html.get("leaked_secrets", [])[:10],
             "passive_jwts": html.get("passive_jwts", [])[:8],
             "source_maps": html.get("source_maps", [])[:8],
@@ -202,6 +215,9 @@ def _distill_intel(intel: dict[str, Any]) -> dict[str, Any]:
             "dnssec_signed": rd.get("dnssec_signed"),
             "days_until_expiry": rd.get("days_until_expiry"),
             "cidr": rd.get("cidr"),
+            "abuse_contact": rd.get("abuse_contact"),
+            "emails": (rd.get("emails") or [])[:8],
+            "phone_numbers": (rd.get("phone_numbers") or [])[:6],
         }
     return out
 
@@ -238,6 +254,8 @@ def distill_artifact(data: Any, *, max_chars: int = 12_000) -> Any:
             "url": data.get("url"),
             "target": data.get("target"),
             "pinned_ip": data.get("pinned_ip"),
+            "scope_id": data.get("scope_id"),
+            "auth_ref": data.get("auth_ref"),
             "preset": data.get("preset"),
             "posture": data.get("posture"),
             "findings": data.get("findings", [])[:60],

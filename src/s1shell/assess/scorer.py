@@ -1549,6 +1549,45 @@ def evaluate_posture_with_suppressions(
                     asvs="V7.4.1",
                 )
             )
+        flagged_forms = [f for f in h.form_endpoints if "*" in f]
+        if flagged_forms:
+            raw_findings.append(
+                AssessmentFinding(
+                    id="HTML-009",
+                    severity="LOW",
+                    category="html",
+                    title=(
+                        f"Discovered {len(flagged_forms)} form/URL endpoint(s) with high-interest "
+                        "input parameters"
+                    ),
+                    evidence="; ".join(flagged_forms[:4])[:280],
+                    remediation=(
+                        "Validate and allowlist redirect/URL, file/path, and object-ID parameters "
+                        "server-side to prevent open redirect, SSRF, LFI, and IDOR weaknesses."
+                    ),
+                    cwe="CWE-20",
+                    asvs="V5.1.1",
+                )
+            )
+        if h.internal_leaks_and_comments:
+            raw_findings.append(
+                AssessmentFinding(
+                    id="HTML-010",
+                    severity="LOW",
+                    category="disclosure",
+                    title=(
+                        f"Internal IP/hostname reference or developer comment exposed in HTML "
+                        f"({len(h.internal_leaks_and_comments)} item(s))"
+                    ),
+                    evidence="; ".join(h.internal_leaks_and_comments[:4])[:280],
+                    remediation=(
+                        "Strip internal RFC1918 IPs, `.internal`/`.corp` hostnames, and developer "
+                        "TODO/debug HTML comments before deploying to production."
+                    ),
+                    cwe="CWE-615",
+                    asvs="V14.3.3",
+                )
+            )
 
     # 16. Offline End-of-Life (EOL) Software Detection (v0.4.0)
     eol_matches = [m for m in fingerprint.matches if m.eol]

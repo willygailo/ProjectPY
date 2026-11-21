@@ -8,7 +8,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, TextIO
 
-from s1shell import __version__
+from s1shell import DEV_CREDIT, __version__
 from s1shell.ai.client import SUPPORTED_AI_MODES
 from s1shell.ai.pipelines import SUPPORTED_AI_PIPELINES
 from s1shell.ai.service import AIService
@@ -27,6 +27,14 @@ from s1shell.cve.service import CVEService
 from s1shell.doctor import run_doctor
 from s1shell.errors import ExitCode, PolicyGateError, S1ShellError, ValidationError
 from s1shell.fingerprint.service import FingerprintService
+from s1shell.help_guide import (
+    build_parser_epilog,
+    build_subcommand_epilog,
+    render_check_report,
+    render_cli_guide,
+    render_full_manual,
+    render_module_guide,
+)
 from s1shell.intel.service import SUPPORTED_INTEL_SOURCES, IntelService
 from s1shell.mcp_server import (
     DEFAULT_MCP_HOST,
@@ -151,23 +159,79 @@ def _shared_flags_parser() -> argparse.ArgumentParser:
     return common
 
 
+def _enrich_parser_help(parser: argparse.ArgumentParser) -> None:
+    """Attach RawDescriptionHelpFormatter and rich usage examples to every subparser."""
+    for action in parser._actions:
+        mod_choices = getattr(action, "choices", None)
+        if not isinstance(mod_choices, dict):
+            continue
+        for mod_name, mod_parser in mod_choices.items():
+            if not isinstance(mod_parser, argparse.ArgumentParser):
+                continue
+            mod_parser.formatter_class = argparse.RawDescriptionHelpFormatter
+            mod_parser.epilog = build_parser_epilog(str(mod_name))
+            for sub_action in mod_parser._actions:
+                sub_choices = getattr(sub_action, "choices", None)
+                if not isinstance(sub_choices, dict):
+                    continue
+                for sub_name, sub_parser in sub_choices.items():
+                    if isinstance(sub_parser, argparse.ArgumentParser):
+                        sub_parser.formatter_class = argparse.RawDescriptionHelpFormatter
+                        sub_parser.epilog = build_subcommand_epilog(str(mod_name), str(sub_name))
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build the S1shell argparse command tree."""
     common = _shared_flags_parser()
     parser = argparse.ArgumentParser(
         prog="s1shell",
         parents=[common],
+        add_help=False,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
         description=(
-            "S1shell: Authorized CVE/SBOM research, scoped target profiling, "
-            "passive fingerprinting, posture scoring, remediation playbooks, and reporting."
+            f"S1shell v{__version__} ({DEV_CREDIT}): Authorized CVE/SBOM research, "
+            "scoped target profiling, passive fingerprinting, posture scoring, "
+            "remediation playbooks, defensive AI, MCP server, and reporting."
+        ),
+        epilog=(
+            "Run `s1shell --check` for live local diagnostics + full usage guide, "
+            "`s1shell help <module>` for detailed module options, or `s1shell help --all` "
+            f"for the complete manual. [{DEV_CREDIT}]"
         ),
     )
-    parser.add_argument("--version", action="version", version=f"s1shell {__version__}")
-    modules = parser.add_subparsers(dest="module", required=True)
+    parser.add_argument(
+        "-h",
+        "--help",
+        dest="show_help",
+        action="store_true",
+        default=False,
+        help="Show S1shell CLI overview, modules, workflows, and usage guide.",
+    )
+    parser.add_argument(
+        "--help-all",
+        dest="show_help_all",
+        action="store_true",
+        default=False,
+        help="Show complete CLI manual for every module, subcommand, and example.",
+    )
+    parser.add_argument(
+        "--check",
+        dest="run_check",
+        action="store_true",
+        default=False,
+        help="Run local readiness check (`doctor`) + show full CLI usage guide.",
+    )
+    parser.add_argument(
+        "-V",
+        "--version",
+        action="version",
+        version=f"s1shell {__version__} ({DEV_CREDIT})",
+    )
+    modules = parser.add_subparsers(dest="module", required=False)
 
     # --- scope ---
     scope_p = modules.add_parser("scope", parents=[common], help="Manage authorized target scope.")
-    scope_cmds = scope_p.add_subparsers(dest="command", required=True)
+    scope_cmds = scope_p.add_subparsers(dest="command", required=False)
 
     s_add = scope_cmds.add_parser(
         "add", parents=[common], help="Add an authorized scope or exclusion entry."
@@ -225,7 +289,7 @@ def build_parser() -> argparse.ArgumentParser:
     cve_p = modules.add_parser(
         "cve", parents=[common], help="Research CVEs & audit lockfiles/SBOMs (zero target contact)."
     )
-    cve_cmds = cve_p.add_subparsers(dest="command", required=True)
+    cve_cmds = cve_p.add_subparsers(dest="command", required=False)
 
     c_search = cve_cmds.add_parser("search", parents=[common], help="Search CVEs by keyword/CPE.")
     c_search.add_argument("--keyword", default=None, help="Keyword query (e.g. 'nginx 1.18').")
@@ -304,7 +368,7 @@ def build_parser() -> argparse.ArgumentParser:
     c_audit.add_argument("--offline", action="store_true", help="Read from local cache only.")
 
     c_cache = cve_cmds.add_parser("cache", parents=[common], help="Manage local CVE cache.")
-    c_cache_cmds = c_cache.add_subparsers(dest="cache_cmd", required=True)
+    c_cache_cmds = c_cache.add_subparsers(dest="cache_cmd", required=False)
     c_cache_cmds.add_parser("clear", parents=[common], help="Clear cached CVE entries.")
 
     # --- profile ---
@@ -349,7 +413,7 @@ def build_parser() -> argparse.ArgumentParser:
     rep_p = modules.add_parser(
         "report", parents=[common], help="Compile CVE, profile, fingerprint, and assess reports."
     )
-    rep_cmds = rep_p.add_subparsers(dest="command", required=True)
+    rep_cmds = rep_p.add_subparsers(dest="command", required=False)
     r_build = rep_cmds.add_parser("build", parents=[common], help="Build combined report.")
     r_build.add_argument(
         "--input",
@@ -387,7 +451,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # --- audit ---
     aud_p = modules.add_parser("audit", parents=[common], help="Inspect or verify audit log.")
-    aud_cmds = aud_p.add_subparsers(dest="command", required=True)
+    aud_cmds = aud_p.add_subparsers(dest="command", required=False)
     a_list = aud_cmds.add_parser("list", parents=[common], help="Show recent audit log events.")
     a_list.add_argument("--limit", type=int, default=50, help="Maximum recent events to show.")
     a_list.add_argument(
@@ -431,9 +495,12 @@ def build_parser() -> argparse.ArgumentParser:
     ai_p = modules.add_parser(
         "ai",
         parents=[common],
-        help="AI `.env` management (Anthropic/Ollama/OpenAI-compat/Gemini) & defensive triage.",
+        help=(
+            "AI `.env` management (builtin/Ollama/Anthropic/OpenAI-compat/Gemini) "
+            "& defensive triage."
+        ),
     )
-    ai_cmds = ai_p.add_subparsers(dest="command", required=True)
+    ai_cmds = ai_p.add_subparsers(dest="command", required=False)
 
     ai_env = ai_cmds.add_parser(
         "env",
@@ -444,7 +511,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--provider",
         choices=list(SUPPORTED_AI_PROVIDERS),
         default=None,
-        help="Select AI provider (anthropic, ollama, openai_compat, gemini).",
+        help="Select AI provider (anthropic, ollama, openai_compat, gemini, builtin).",
     )
     ai_env.add_argument("--base-url", default=None, help="Override API endpoint URL.")
     ai_env.add_argument("--set-key", default=None, help="Set API key for the active provider.")
@@ -552,7 +619,7 @@ def build_parser() -> argparse.ArgumentParser:
         parents=[common],
         help="List or inspect bundled and custom (~/.s1shell/skills.d) defensive AI skills.",
     )
-    ai_skills_cmds = ai_skills.add_subparsers(dest="skills_cmd", required=True)
+    ai_skills_cmds = ai_skills.add_subparsers(dest="skills_cmd", required=False)
     ai_skills_cmds.add_parser("list", parents=[common], help="List all available AI skills.")
     ai_skill_show = ai_skills_cmds.add_parser(
         "show", parents=[common], help="Show full prompt details for one AI skill."
@@ -733,7 +800,7 @@ def build_parser() -> argparse.ArgumentParser:
     assess_p.add_argument(
         "--ai",
         action="store_true",
-        help="Include defensive AI triage (Anthropic, local Ollama, OpenAI-compat, or Gemini).",
+        help="Include defensive AI triage (builtin, Ollama, Anthropic, OpenAI-compat, or Gemini).",
     )
     assess_p.add_argument(
         "--ai-provider",
@@ -831,7 +898,7 @@ def build_parser() -> argparse.ArgumentParser:
         parents=[common],
         help="Passive threat intelligence (VirusTotal, GreyNoise, urlscan.io, GitHub GHSA).",
     )
-    intel_cmds = intel_p.add_subparsers(dest="command", required=True)
+    intel_cmds = intel_p.add_subparsers(dest="command", required=False)
 
     i_env = intel_cmds.add_parser(
         "env",
@@ -915,7 +982,7 @@ def build_parser() -> argparse.ArgumentParser:
         parents=[common],
         help="Offline decoder, encoder, smart token/cert/hash inspector, & checksums.",
     )
-    codec_cmds = codec_p.add_subparsers(dest="command", required=True)
+    codec_cmds = codec_p.add_subparsers(dest="command", required=False)
 
     c_dec = codec_cmds.add_parser(
         "decode",
@@ -1035,7 +1102,7 @@ def build_parser() -> argparse.ArgumentParser:
         parents=[common],
         help="Run S1shell's online Streamable HTTP or local stdio read-only MCP server.",
     )
-    mcp_cmds = mcp_p.add_subparsers(dest="command", required=True)
+    mcp_cmds = mcp_p.add_subparsers(dest="command", required=False)
     mcp_serve = mcp_cmds.add_parser(
         "serve",
         parents=[common],
@@ -1135,7 +1202,7 @@ def build_parser() -> argparse.ArgumentParser:
         parents=[common],
         help="Check local Tor SOCKS5h readiness (`status`) or verify live Tor exit (`check`).",
     )
-    tor_cmds = tor_p.add_subparsers(dest="command", required=True)
+    tor_cmds = tor_p.add_subparsers(dest="command", required=False)
     tor_cmds.add_parser(
         "status",
         parents=[common],
@@ -1147,6 +1214,41 @@ def build_parser() -> argparse.ArgumentParser:
         help="Verify live Tor exit egress via check.torproject.org over SOCKS5h (fail-closed).",
     )
 
+    # --- help ---
+    help_p = modules.add_parser(
+        "help",
+        parents=[common],
+        help="Show full CLI usage guide, workflows, or detailed help for one module/subcommand.",
+    )
+    help_p.add_argument(
+        "topic",
+        nargs="?",
+        default=None,
+        help="Optional module name (e.g. assess, scope, intel, cve, ai, codec, mcp, tor).",
+    )
+    help_p.add_argument(
+        "subtopic",
+        nargs="?",
+        default=None,
+        help="Optional subcommand name (e.g. `s1shell help cve audit`).",
+    )
+    help_p.add_argument(
+        "--all",
+        dest="help_all",
+        action="store_true",
+        help="Show complete CLI manual with all modules, subcommands, and examples.",
+    )
+
+    # --- check ---
+    modules.add_parser(
+        "check",
+        parents=[common],
+        help=(
+            "Run local readiness check (`doctor`) + show full CLI usage guide (alias for --check)."
+        ),
+    )
+
+    _enrich_parser_help(parser)
     return parser
 
 
@@ -1157,6 +1259,7 @@ def _opt(args: argparse.Namespace, name: str, default: Any = None) -> Any:
 def dispatch(
     args: argparse.Namespace,
     *,
+    parser: argparse.ArgumentParser | None = None,
     scope_manager: ScopeManager | None = None,
     cve_service: CVEService | None = None,
     dep_audit_service: DependencyAuditService | None = None,
@@ -1191,6 +1294,106 @@ def dispatch(
     out_file: Path | None = _opt(args, "out")
     authorized = bool(_opt(args, "authorized", False))
     console = make_console(no_color=no_color, file=stdout)
+
+    if bool(_opt(args, "show_help_all", False)):
+        render_full_manual(
+            fmt=str(_opt(args, "fmt", "table")),
+            console=console,
+            out_file=out_file,
+            stdout=stdout,
+        )
+        return int(ExitCode.SUCCESS)
+
+    if bool(_opt(args, "run_check", False)) or args.module == "check":
+        doc_report = run_doctor(cfg)
+        render_check_report(
+            doc_report,
+            fmt=str(_opt(args, "fmt", "table")),
+            console=console,
+            out_file=out_file,
+            stdout=stdout,
+        )
+        return int(ExitCode.SUCCESS if doc_report.healthy else ExitCode.ERROR)
+
+    if args.module == "help":
+        help_fmt = str(_opt(args, "fmt", "table"))
+        if bool(_opt(args, "help_all", False)):
+            render_full_manual(fmt=help_fmt, console=console, out_file=out_file, stdout=stdout)
+        elif _opt(args, "topic"):
+            render_module_guide(
+                str(args.topic),
+                subcommand_name=_opt(args, "subtopic"),
+                parser=parser if parser is not None else build_parser(),
+                fmt=help_fmt,
+                console=console,
+                out_file=out_file,
+                stdout=stdout,
+            )
+        else:
+            render_cli_guide(fmt=help_fmt, console=console, out_file=out_file, stdout=stdout)
+        return int(ExitCode.SUCCESS)
+
+    if bool(_opt(args, "show_help", False)) or args.module is None:
+        help_fmt = str(_opt(args, "fmt", "table"))
+        if args.module:
+            render_module_guide(
+                str(args.module),
+                subcommand_name=_opt(args, "command"),
+                parser=parser if parser is not None else build_parser(),
+                fmt=help_fmt,
+                console=console,
+                out_file=out_file,
+                stdout=stdout,
+            )
+        else:
+            render_cli_guide(fmt=help_fmt, console=console, out_file=out_file, stdout=stdout)
+        return int(ExitCode.SUCCESS)
+
+    subcommand_modules = {
+        "scope",
+        "cve",
+        "report",
+        "audit",
+        "ai",
+        "intel",
+        "codec",
+        "mcp",
+        "tor",
+    }
+    if args.module in subcommand_modules and not _opt(args, "command"):
+        render_module_guide(
+            str(args.module),
+            parser=parser if parser is not None else build_parser(),
+            fmt=str(_opt(args, "fmt", "table")),
+            console=console,
+            out_file=out_file,
+            stdout=stdout,
+        )
+        return int(ExitCode.SUCCESS)
+
+    if args.module == "cve" and _opt(args, "command") == "cache" and not _opt(args, "cache_cmd"):
+        render_module_guide(
+            "cve",
+            subcommand_name="cache",
+            parser=parser if parser is not None else build_parser(),
+            fmt=str(_opt(args, "fmt", "table")),
+            console=console,
+            out_file=out_file,
+            stdout=stdout,
+        )
+        return int(ExitCode.SUCCESS)
+
+    if args.module == "ai" and _opt(args, "command") == "skills" and not _opt(args, "skills_cmd"):
+        render_module_guide(
+            "ai",
+            subcommand_name="skills",
+            parser=parser if parser is not None else build_parser(),
+            fmt=str(_opt(args, "fmt", "table")),
+            console=console,
+            out_file=out_file,
+            stdout=stdout,
+        )
+        return int(ExitCode.SUCCESS)
 
     scope_mgr = (
         scope_manager
@@ -1352,10 +1555,21 @@ def dispatch(
                         f"at or above {args.fail_on}."
                     )
             return int(ExitCode.SUCCESS)
-        if args.command == "cache" and args.cache_cmd == "clear":
-            cleared = cve_svc.clear_cache()
-            write_or_print(
-                f"Cleared {cleared} cached CVE entries.", out_file=out_file, stdout=stdout
+        if args.command == "cache":
+            if args.cache_cmd == "clear":
+                cleared = cve_svc.clear_cache()
+                write_or_print(
+                    f"Cleared {cleared} cached CVE entries.", out_file=out_file, stdout=stdout
+                )
+                return int(ExitCode.SUCCESS)
+            render_module_guide(
+                "cve",
+                subcommand_name="cache",
+                parser=parser if parser is not None else build_parser(),
+                fmt=fmt,
+                console=console,
+                out_file=out_file,
+                stdout=stdout,
             )
             return int(ExitCode.SUCCESS)
 
@@ -1508,6 +1722,16 @@ def dispatch(
                     sk, fmt=fmt, console=console, out_file=out_file, stdout=stdout
                 )
                 return int(ExitCode.SUCCESS)
+            render_module_guide(
+                "ai",
+                subcommand_name="skills",
+                parser=parser if parser is not None else build_parser(),
+                fmt=fmt,
+                console=console,
+                out_file=out_file,
+                stdout=stdout,
+            )
+            return int(ExitCode.SUCCESS)
         if args.command == "investigate":
             inv_res = ai_svc.investigate(
                 inputs=args.inputs,
@@ -1928,7 +2152,7 @@ def main(
 
     verbose = bool(_opt(args, "verbose", False))
     try:
-        return dispatch(args, stdout=stdout, stderr=err_stream)
+        return dispatch(args, parser=parser, stdout=stdout, stderr=err_stream)
     except S1ShellError as exc:
         err_stream.write(f"Error: {exc}\n")
         return int(exc.exit_code)

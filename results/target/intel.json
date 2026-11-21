@@ -1,0 +1,220 @@
+{
+  "indicator": "www.lenovo.com",
+  "indicator_type": "domain",
+  "resolved_ip": "23.215.189.23",
+  "sources_queried": [
+    "vt",
+    "greynoise",
+    "urlscan",
+    "rdap"
+  ],
+  "cached": false,
+  "virustotal": {
+    "indicator": "www.lenovo.com",
+    "indicator_type": "domain",
+    "malicious": 0,
+    "suspicious": 0,
+    "harmless": 61,
+    "undetected": 31,
+    "reputation": 0,
+    "as_owner": null,
+    "country": null,
+    "categories": [],
+    "last_analysis_utc": "2026-11-20T15:36:27Z",
+    "gui_url": "https://www.virustotal.com/gui/domain/www.lenovo.com"
+  },
+  "greynoise": {
+    "ip": "23.215.189.23",
+    "noise": false,
+    "riot": false,
+    "classification": "unknown",
+    "name": null,
+    "last_seen": null,
+    "message": "IP not observed scanning the internet or in RIOT.",
+    "link": null
+  },
+  "urlscan": {
+    "query": "domain:www.lenovo.com",
+    "total_results": 1051,
+    "recent_scans": [
+      {
+        "indexed_at": "2026-11-20T20:31:53.740Z",
+        "page_url": "https://deyoga.onrender.com/",
+        "status": null,
+        "server": "cloudflare",
+        "ip": "216.24.57.18",
+        "asn": "RENDER - Render, US",
+        "title": "DE Yoga",
+        "result_url": "https://urlscan.io/api/v1/result/01a1faa8-4e40-71ad-b058-27bcd4f6fa5c/"
+      },
+      {
+        "indexed_at": "2026-11-20T19:51:21.799Z",
+        "page_url": "https://www.lenovo.com/de/de/",
+        "status": null,
+        "server": "openresty",
+        "ip": "23.36.157.79",
+        "asn": "AKAMAI-AS - Akamai Technologies, Inc., US",
+        "title": "Offizielle Website von Lenovo | Notebooks, Desktop-PCs, Tablets, Monitore | Lenovo DE | Lenovo Deutschland",
+        "result_url": "https://urlscan.io/api/v1/result/01a1fa83-1a4a-7135-b7db-17ce79f1399b/"
+      },
+      {
+        "indexed_at": "2026-11-20T14:47:04.869Z",
+        "page_url": "https://larryconrad.blogspot.com/",
+        "status": null,
+        "server": "GSE",
+        "ip": "2a00:1450:4001:c1f::84",
+        "asn": "GOOGLE - Google LLC, US",
+        "title": "Larry Conrad",
+        "result_url": "https://urlscan.io/api/v1/result/01a1f96c-93cb-7529-a5ff-979604b1314d/"
+      },
+      {
+        "indexed_at": "2026-11-20T13:28:31.051Z",
+        "page_url": "http://moonndenitati.blogspot.com/",
+        "status": null,
+        "server": "GSE",
+        "ip": "142.251.110.132",
+        "asn": "GOOGLE - Google LLC, US",
+        "title": "Fashion Luxxury",
+        "result_url": "https://urlscan.io/api/v1/result/01a1f924-af37-713e-a6ba-d05890174407/"
+      },
+      {
+        "indexed_at": "2026-11-20T10:26:00.193Z",
+        "page_url": "https://www.lenovo.com/hk/edu/hkedu/en/login/edu/?returnUrl=https%3A%2F%2Fwww.lenovo.com%2Fhk%2Fedu%2Fhkedu%2Fen%2F",
+        "status": null,
+        "server": "openresty",
+        "ip": "2.19.217.18",
+        "asn": "AKAMAI-AS - Akamai Technologies, Inc., US",
+        "title": "Lenovo Education Store | Lenovo HK",
+        "result_url": "https://urlscan.io/api/v1/result/01a1f87d-b32c-70cc-bd25-7dc69742de2a/"
+      },
+      {
+        "indexed_at": "2026-11-20T02:25:19.911Z",
+        "page_url": "https://www.lenovo.com/de/de/landing-pages/promos/weekly-deals/",
+        "status": null,
+        "server": "openresty",
+        "ip": "23.222.81.90",
+        "asn": "AKAMAI-AS - Akamai Technologies, Inc., US",
+        "title": "404 | Lenovo Deutschland",
+        "result_url": "https://urlscan.io/api/v1/result/01a1f6c5-a11a-758b-8b7f-51780ca1ab44/"
+      },
+      {
+        "indexed_at": "2026-11-20T01:58:58.991Z",
+        "page_url": "https://www.lenovo.com/us/vipmembers/perksoffer/en/p/handheld/legion-go-s/83n6000gus?clickid=XDLXISXm1xyZUV5U1H2-UwwFUkrUnfw:31RxTg0&irgwc=1&afsrc=1&PID=221109&acid=ww:affiliate:bv0as6&cid=us:affiliate:cxsaam&returnUrl=https%3A%2F%2Fwww.lenovo.com%2Fus%2Fvipmembers%2Fperksoffer%2Fen%2Fp%2Fhandheld%2Flegion-go-s%2F83n6000gus%3Fclickid%3DXDLXISXm1xyZUV5U1H2-UwwFUkrUnfw%253A31RxTg0%26irgwc%3D1%26afsrc%3D1%26PID%3D221109%26acid%3Dww%3Aaffiliate%3Abv0as6%26cid%3Dus%3Aaffiliate%3Acxsaam",
+        "status": null,
+        "server": "openresty",
+        "ip": "23.34.125.78",
+        "asn": "AKAMAI-AS - Akamai Technologies, Inc., US",
+        "title": "Lenovo Legion Go S Gen 1 | Handheld Power Fueled by AMD Ryzen\u2122 | 83N6000GUS | Lenovo USAffinity Store",
+        "result_url": "https://urlscan.io/api/v1/result/01a1f6ad-5812-722a-9a70-741e1dd9a4e9/"
+      },
+      {
+        "indexed_at": "2026-11-20T01:31:13.137Z",
+        "page_url": "http://facebook-photo5.blogspot.com/",
+        "status": null,
+        "server": "GSE",
+        "ip": "142.251.20.132",
+        "asn": "GOOGLE - Google LLC, US",
+        "title": "facebook",
+        "result_url": "https://urlscan.io/api/v1/result/01a1f693-f1aa-7458-a8f9-b600d691ef9c/"
+      },
+      {
+        "indexed_at": "2026-11-19T12:43:44.529Z",
+        "page_url": "https://viralmeletop.blogspot.com/",
+        "status": null,
+        "server": "GSE",
+        "ip": "142.250.154.132",
+        "asn": "GOOGLE - Google LLC, US",
+        "title": "Viral PANAS Meletop!",
+        "result_url": "https://urlscan.io/api/v1/result/01a1f3d5-3e73-75ff-9206-bdf01967324a/"
+      },
+      {
+        "indexed_at": "2026-11-19T09:26:43.150Z",
+        "page_url": "https://sahabatcinema.blogspot.com/",
+        "status": null,
+        "server": "GSE",
+        "ip": "2a00:1450:4001:c21::84",
+        "asn": "GOOGLE - Google LLC, US",
+        "title": "Sahabat Cinema | Nonton Cinema Bareng Sahabat",
+        "result_url": "https://urlscan.io/api/v1/result/01a1f321-0847-7735-864f-eeaedfe119a5/"
+      }
+    ],
+    "observed_ips": [
+      "216.24.57.18",
+      "23.36.157.79",
+      "2a00:1450:4001:c1f::84",
+      "142.251.110.132",
+      "2.19.217.18",
+      "23.222.81.90",
+      "23.34.125.78",
+      "142.251.20.132",
+      "142.250.154.132",
+      "2a00:1450:4001:c21::84"
+    ],
+    "observed_servers": [
+      "cloudflare",
+      "openresty",
+      "GSE"
+    ],
+    "observed_asns": [
+      "RENDER - Render, US",
+      "AKAMAI-AS - Akamai Technologies, Inc., US",
+      "GOOGLE - Google LLC, US"
+    ]
+  },
+  "rdap": {
+    "indicator": "www.lenovo.com",
+    "indicator_type": "domain",
+    "cached": false,
+    "handle": "90002512_DOMAIN_COM-VRSN",
+    "name": "LENOVO.COM",
+    "registrar": "MarkMonitor Inc.",
+    "organization": null,
+    "country": null,
+    "statuses": [
+      "client delete prohibited",
+      "client transfer prohibited",
+      "client update prohibited",
+      "server delete prohibited",
+      "server transfer prohibited",
+      "server update prohibited"
+    ],
+    "transfer_locked": true,
+    "dnssec_signed": false,
+    "created_at": "2002-09-06T01:53:03Z",
+    "updated_at": "2026-08-05T09:04:49Z",
+    "expires_at": "2027-09-06T01:53:05Z",
+    "domain_age_days": 8842,
+    "days_until_expiry": 288,
+    "nameservers": [
+      "a1-79.akam.net",
+      "a11-64.akam.net",
+      "a24-65.akam.net",
+      "a28-66.akam.net",
+      "a3-67.akam.net",
+      "a8-64.akam.net"
+    ],
+    "cidr": null,
+    "start_address": null,
+    "end_address": null,
+    "abuse_contact": "abusecomplaints@markmonitor.com",
+    "emails": [
+      "abusecomplaints@markmonitor.com"
+    ],
+    "phone_numbers": [
+      "+1.2086851750"
+    ],
+    "entities": [
+      "MarkMonitor Inc. [292] (registrar)"
+    ],
+    "source_url": "https://rdap.verisign.com/com/v1/domain/lenovo.com",
+    "schema_version": "1.0",
+    "tool_version": "0.5.0",
+    "generated_at_utc": "2026-11-21T02:47:48Z",
+    "artifact_type": "rdap_report"
+  },
+  "warnings": [],
+  "schema_version": "1.0",
+  "tool_version": "0.5.0",
+  "generated_at_utc": "2026-11-21T02:47:48Z",
+  "artifact_type": "intel_report"
+}

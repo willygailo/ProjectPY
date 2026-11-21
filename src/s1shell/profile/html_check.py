@@ -21,8 +21,23 @@ _SECRET_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("github_token", re.compile(r"\b(gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\b")),
     ("stripe_live_key", re.compile(r"\b(sk_live_[0-9a-zA-Z]{16,})\b")),
     ("slack_token", re.compile(r"\b(xox[baprs]-[0-9A-Za-z-]{10,})\b")),
+    (
+        "slack_webhook",
+        re.compile(
+            r"(https://hooks\.slack\.com/services/T[A-Z0-9]{8,}/B[A-Z0-9]{8,}/[A-Za-z0-9]{20,})"
+        ),
+    ),
+    (
+        "discord_webhook",
+        re.compile(
+            r"(https://(?:ptb\.|canary\.)?discord(?:app)?\.com/api/webhooks/\d{15,22}/[A-Za-z0-9_-]{50,})"
+        ),
+    ),
     ("telegram_bot_token", re.compile(r"\b(\d{8,10}:AA[0-9A-Za-z_-]{33})\b")),
     ("openai_api_key", re.compile(r"\b(sk-(?:proj-)?[A-Za-z0-9_-]{20,})\b")),
+    ("twilio_account_sid", re.compile(r"\b(AC[a-f0-9]{32})\b")),
+    ("sendgrid_api_key", re.compile(r"\b(SG\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{35,})\b")),
+    ("mailgun_api_key", re.compile(r"\b(key-[0-9a-zA-Z]{32})\b")),
     ("private_key_pem", re.compile(r"(-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----)")),
     (
         "db_credentials_uri",
@@ -66,6 +81,90 @@ _PUBLIC_ID_AND_KEY_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
         "mapbox_public_token",
         re.compile(r"\b(pk\.eyJ[A-Za-z0-9_-]{20,120}\.[A-Za-z0-9_-]{10,80})\b"),
     ),
+    (
+        "supabase_project_url",
+        re.compile(r"(https://[a-z0-9-]{12,36}\.supabase\.co)"),
+    ),
+)
+
+_HIGH_INTEREST_PARAMS = frozenset(
+    {
+        "redirect",
+        "redirect_uri",
+        "redirect_url",
+        "url",
+        "next",
+        "return",
+        "returnurl",
+        "return_url",
+        "callback",
+        "dest",
+        "destination",
+        "continue",
+        "file",
+        "filepath",
+        "path",
+        "template",
+        "page",
+        "include",
+        "doc",
+        "folder",
+        "dir",
+        "cmd",
+        "exec",
+        "command",
+        "query",
+        "search",
+        "q",
+        "id",
+        "uid",
+        "user",
+        "user_id",
+        "userid",
+        "account",
+        "role",
+        "admin",
+        "debug",
+        "test",
+        "token",
+        "access_token",
+        "api_key",
+        "apikey",
+        "key",
+        "secret",
+        "password",
+        "passwd",
+        "upload",
+    }
+)
+
+_INTERNAL_IP_OR_HOST_RE = re.compile(
+    r"\b("
+    r"10\.(?:\d{1,3}\.){2}\d{1,3}|"
+    r"192\.168\.\d{1,3}\.\d{1,3}|"
+    r"172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|"
+    r"localhost:\d{2,5}|"
+    r"[a-zA-Z0-9_-]+(?:\.[a-zA-Z0-9_-]+)+\.(?:internal|corp|local|lan|intranet)"
+    r")\b"
+)
+
+_DEV_COMMENT_KEYWORDS = (
+    "todo",
+    "fixme",
+    "bug",
+    "hack",
+    "staging",
+    "internal",
+    "admin",
+    "debug",
+    "password",
+    "secret",
+    "token",
+    "api",
+    "backup",
+    "deprecated",
+    "legacy",
+    "temp",
 )
 
 _EMAIL_RE = re.compile(
@@ -296,6 +395,8 @@ def scan_passive_entities(
     list[dict[str, str]],
     list[str],
     list[str],
+    list[str],
+    list[str],
 ]:
     """Passively extract emails (incl. Gmail), phones, keys/IDs, names, socials & endpoints."""
     emails: list[str] = list(parser.mailto_emails)
@@ -356,7 +457,22 @@ def scan_passive_entities(
         if p_val and p_val not in endpoints and len(endpoints) < 25:
             endpoints.append(p_val)
 
-    return emails, phones, exposed_ids_and_keys, identities, social_links, endpoints
+    internal_leaks: list[str] = list(parser.dev_comments)
+    for m in _INTERNAL_IP_OR_HOST_RE.finditer(text):
+        leak = f"internal:{m.group(1)}"
+        if leak not in internal_leaks and len(internal_leaks) < 20:
+            internal_leaks.append(leak)
+
+    return (
+        emails,
+        phones,
+        exposed_ids_and_keys,
+        identities,
+        social_links,
+        endpoints,
+        list(parser.form_endpoints),
+        internal_leaks,
+    )
 
 
 def _redact_secret(raw: str) -> str:
@@ -521,6 +637,7 @@ class _PassiveHTMLParser(HTMLParser):
         self._current_form_action = ""
         self._current_form_method = "get"
         self._form_has_password = False
+        self._current_form_params: list[str] = []
 
         self.meta_generator: str | None = None
         self.meta_csp: str | None = None
@@ -538,6 +655,28 @@ class _PassiveHTMLParser(HTMLParser):
         self.meta_identities: list[dict[str, str]] = []
         self.social_links: list[str] = []
         self.jsonld_blocks: list[str] = []
+        self.form_endpoints: list[str] = []
+        self.dev_comments: list[str] = []
+
+    def _record_query_params(self, raw_url: str) -> None:
+        if "?" not in raw_url:
+            return
+        path_part, query_part = raw_url.split("?", 1)
+        query_part = query_part.split("#", 1)[0]
+        flagged: list[str] = []
+        for pair in query_part.split("&")[:15]:
+            k = pair.split("=", 1)[0].strip()
+            if not k:
+                continue
+            low_k = k.lower()
+            if low_k in _HIGH_INTEREST_PARAMS:
+                flagged.append(f"{k}*")
+        if flagged:
+            target_path = (path_part or "/")[:80]
+            self._add_unique(
+                self.form_endpoints,
+                f"GET {target_path} (query: {', '.join(flagged)})",
+            )
 
     def _add_unique(self, target: list[str], value: str, *, limit: int = 25) -> None:
         if value and value not in target and len(target) < limit:
@@ -663,6 +802,8 @@ class _PassiveHTMLParser(HTMLParser):
                     self._add_unique(self.tel_numbers, norm_tel)
             elif any(host in low_href for host in _SOCIAL_HOST_PATTERNS):
                 self._add_unique(self.social_links, href[:200])
+            if href and not low_href.startswith(("mailto:", "tel:", "javascript:", "#")):
+                self._record_query_params(href)
             if target_attr == "_blank" and href:
                 is_ext, _, _ = _parse_external_origin(href, self._page_host)
                 rel_tokens = set(attr_map.get("rel", "").lower().split())
@@ -683,16 +824,26 @@ class _PassiveHTMLParser(HTMLParser):
         if low_tag == "form":
             self._in_form = True
             self._form_has_password = False
+            self._current_form_params = []
             action = attr_map.get("action", "")
             self._current_form_action = action
             self._current_form_method = (attr_map.get("method", "get") or "get").lower()
+            if action:
+                self._record_query_params(action)
             if action.lower().startswith("http://"):
                 self._add_unique(self.insecure_forms, f"form action over HTTP: {action[:160]}")
             return
 
-        if low_tag == "input":
+        if low_tag in {"input", "select", "textarea"}:
             in_name = attr_map.get("name", "")
             in_type = attr_map.get("type", "").lower()
+            if in_name:
+                tag_param = f"{in_name}*" if in_name.lower() in _HIGH_INTEREST_PARAMS else in_name
+                if (
+                    tag_param not in self._current_form_params
+                    and len(self._current_form_params) < 20
+                ):
+                    self._current_form_params.append(tag_param)
             if in_name == "csrfmiddlewaretoken":
                 self._add_unique(self.framework_hints, "django")
             if in_name == "authenticity_token":
@@ -725,10 +876,24 @@ class _PassiveHTMLParser(HTMLParser):
                 self.jsonld_blocks.append(block)
             self._jsonld_chunks = []
         elif low_tag == "form":
+            if self._in_form:
+                act = (self._current_form_action or "/")[:80]
+                mth = self._current_form_method.upper()
+                params_str = ", ".join(self._current_form_params) or "none"
+                self._add_unique(self.form_endpoints, f"{mth} {act} (params: {params_str})")
             self._in_form = False
             self._current_form_action = ""
             self._current_form_method = "get"
             self._form_has_password = False
+            self._current_form_params = []
+
+    def handle_comment(self, data: str) -> None:
+        cleaned = " ".join(data.strip().split())
+        if not cleaned or len(cleaned) < 4:
+            return
+        low = cleaned.lower()
+        if any(kw in low for kw in _DEV_COMMENT_KEYWORDS):
+            self._add_unique(self.dev_comments, f"comment:{cleaned[:120]}", limit=15)
 
     def handle_data(self, data: str) -> None:
         if self._in_title and len("".join(self._title_chunks)) < 200:
@@ -792,6 +957,8 @@ def analyze_html_body(
         identities_and_names,
         social_links,
         cloud_and_api_endpoints,
+        form_endpoints,
+        internal_leaks_and_comments,
     ) = scan_passive_entities(
         text,
         parser=parser,
@@ -822,4 +989,6 @@ def analyze_html_body(
         identities_and_names=identities_and_names,
         social_links=social_links,
         cloud_and_api_endpoints=cloud_and_api_endpoints,
+        form_endpoints=form_endpoints,
+        internal_leaks_and_comments=internal_leaks_and_comments,
     )

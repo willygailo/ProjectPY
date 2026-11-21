@@ -9,6 +9,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from s1shell.ai.builtin import BuiltinAIClient
 from s1shell.ai.guardrails import validate_local_endpoint
 from s1shell.config import RuntimeConfig, classify_anthropic_key
 from s1shell.errors import NetworkError, ValidationError
@@ -472,6 +473,9 @@ def build_ai_client(
             transport=transport,
             sleeper=sleeper,
         )
+    if norm == "builtin":
+        return BuiltinAIClient(cfg)
     raise ValidationError(
-        f"Unsupported AI provider '{provider}'. Choose anthropic, ollama, openai_compat, or gemini."
+        f"Unsupported AI provider '{provider}'. "
+        "Choose anthropic, ollama, openai_compat, gemini, or builtin."
     )

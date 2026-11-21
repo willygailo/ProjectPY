@@ -3,25 +3,56 @@
 version: 1
 skills:
   - id: "attack-path-modeling"
-    name: "Attack-Path & Chokepoint Modeler"
+    name: "MITRE ATT&CK Path, Cost-to-Attacker & Chokepoint Modeler"
     category: "threat-modeling"
-    description: "Maps observed posture gaps, EOL stacks, and CVEs to theoretical MITRE ATT&CK paths, blast radius, and highest-leverage chokepoint defenses."
+    description: "Chains observed primitives (keys/IDs, buckets, CNAMEs, form params, JWT/OIDC, EOL/KEV CVEs) into cost-ordered MITRE ATT&CK paths with Confirmed/Likely confidence and D3FEND counters."
     recommended_artifacts: ["assess_report", "cve_report", "intel_report"]
     output_sections:
-      - "Priority Attack Paths (MITRE ATT&CK Tactics & Techniques)"
-      - "Chokepoint Controls (Single Fixes Breaking Multiple Paths)"
-      - "Blast Radius & Exposure Matrix"
-      - "Defensive Verification Steps"
+      - "Attack-Path Chains Ordered by Cost-to-Attacker (Confirmed / Likely / Unconfirmed)"
+      - "MITRE ATT&CK Tactic & Technique Mapping (TA0043 / TA0001 / TA0006 / TA0007)"
+      - "Preconditions, Verification Commands & OPSEC/Detection Footprint"
+      - "Chokepoint Controls & MITRE D3FEND Countermeasures"
     system_prompt: >-
-      Act as a principal defensive threat modeler. Using ONLY the evidence inside
-      <untrusted_telemetry>, trace theoretical attacker paths (mapped to MITRE ATT&CK techniques
-      and CWE/OWASP IDs) that chain observed misconfigurations, EOL software, and matched CVEs.
-      Cite exact Finding IDs and CVE IDs present in the telemetry. For every path, identify the
-      highest-leverage preventive and detective chokepoint controls. Never provide exploit code,
-      weaponized payloads, or active attack commands.
+      Act as a senior security operator and threat modeler following PTES, OWASP WSTG v4.2,
+      OWASP Top 10:2021, OWASP API Top 10:2023, NIST SP 800-115, MITRE ATT&CK, and MITRE D3FEND.
+      Apply precision over volume and chain thinking: compose low-severity primitives (exposed
+      keys/IDs, S3/cloud buckets, dangling CNAMEs, form/URL parameters, internal IP/comment leaks,
+      JWT/OIDC flaws, and EOL/CVE/KEV matches) into multi-step attack paths ordered by
+      cost-to-attacker. For each step, state: (1) Objective, (2) MITRE ATT&CK Tactic + Technique ID,
+      (3) Preconditions & Confidence Level (Confirmed / Likely / Unconfirmed), (4) Reproducible
+      S1shell verification command & expected telemetry evidence, (5) OPSEC/detection footprint,
+      and (6) Remediation + MITRE D3FEND countermeasure. Cite ONLY Finding IDs and CVE IDs present
+      in <untrusted_telemetry>.
     user_template: >-
-      Model the top theoretical attack paths and defensive chokepoints from these authorized
-      S1shell telemetry artifacts. Cite exact Finding IDs and CVE IDs from the data only.
+      Model the cost-ordered attack paths, MITRE ATT&CK technique chains, confidence levels
+      (Confirmed/Likely/Unconfirmed), verification commands, and MITRE D3FEND chokepoints from
+      these S1shell telemetry artifacts.
+
+  - id: "ptes-ops-chain"
+    name: "PTES / OWASP WSTG / ATT&CK Operator Chain Brief"
+    category: "pentest-ops"
+    description: "Terse, command-first operator assessment mapping recon entities (emails/Gmail, keys/IDs, forms, internal IPs, CT/RDAP) and findings to ATT&CK, WSTG v4.2, CVSS+EPSS, and D3FEND."
+    recommended_artifacts: ["assess_report", "profile_report", "intel_report", "cve_report"]
+    output_sections:
+      - "Target Surface & High-Signal Primitives (Identities, Keys/IDs, Forms, Origin IPs)"
+      - "Chained Attack Paths (Ordered by Cost-to-Attacker)"
+      - "Technique Breakdown (ATT&CK ID, Preconditions, S1shell Command, Confidence, Footprint)"
+      - "Prioritized Remediation & MITRE D3FEND Countermeasure Table"
+    system_prompt: >-
+      Act as a senior security operator (PTES / OWASP WSTG v4.2 / OWASP API Top 10:2023 /
+      MITRE ATT&CK / MITRE D3FEND). Use a terse, technical, command-first style with tables for
+      mappings and code blocks for verification commands. Follow five principles: (1) Precision
+      over volume, (2) Falsifiable claims with preconditions, exact s1shell verification commands,
+      expected output, and confidence (Confirmed / Likely / Unconfirmed), (3) Chain thinking
+      composing recon primitives (emails/Gmails, exposed keys/client IDs, cloud buckets, form
+      parameters, internal IP/comment disclosures, dangling CNAMEs, and KEV/EPSS CVEs) into
+      credible paths, (4) Honest CVSS v3.1 + EPSS/KEV severity context without inflation, and
+      (5) Concrete remediation paired with MITRE D3FEND countermeasures. Cite ONLY Finding IDs
+      and CVE IDs present in <untrusted_telemetry>.
+    user_template: >-
+      Produce a terse, command-first PTES/WSTG/ATT&CK operator assessment and cost-ordered
+      attack-path chain from these S1shell artifacts, ending with a prioritized D3FEND
+      remediation table.
 
   - id: "pentest-report-writer"
     name: "Client-Ready Pentest Finding & Executive Writer"

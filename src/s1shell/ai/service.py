@@ -57,6 +57,7 @@ _PROVIDER_KEY_VARS = {
     "openai_compat": "OPENAI_API_KEY",
     "gemini": "GEMINI_API_KEY",
     "ollama": "OLLAMA_API_KEY",
+    "builtin": "BUILTIN_API_KEY",
 }
 
 _PROVIDER_MODEL_VARS = {
@@ -64,10 +65,16 @@ _PROVIDER_MODEL_VARS = {
     "openai_compat": "OPENAI_MODEL",
     "gemini": "GEMINI_MODEL",
     "ollama": "OLLAMA_MODEL",
+    "builtin": "BUILTIN_MODEL",
 }
 
 
 def _build_env_note(provider: str, configured: bool, key_type: str) -> str:
+    if provider == "builtin":
+        return (
+            "Built-in offline tactical & defensive synthesizer active "
+            "(zero cloud API key or network required)."
+        )
     if provider == "ollama":
         return (
             "Local Ollama provider active (no cloud API key required; keeps telemetry air-gapped)."
@@ -78,7 +85,7 @@ def _build_env_note(provider: str, configured: bool, key_type: str) -> str:
     if provider == "anthropic" and key_type == "admin":
         return (
             "Admin key (sk-ant-admin*) detected; /v1/messages inference requires a "
-            "standard sk-ant-api* key."
+            "standard sk-ant-api* key (auto-fallback to builtin tactical synthesizer active)."
         )
     return f"{provider} API key configured and ready for defensive analysis."
 
@@ -166,18 +173,18 @@ class AIService:
         api_key, source = self._cfg.get_ai_api_key(active_prov)
         if active_prov == "anthropic":
             key_type = classify_anthropic_key(api_key)
-        elif active_prov == "ollama":
+        elif active_prov in {"ollama", "builtin"}:
             key_type = "local"
         else:
             key_type = "standard" if api_key else "unset"
 
-        configured = True if active_prov == "ollama" else bool(api_key)
+        configured = True if active_prov in {"ollama", "builtin"} else bool(api_key)
         masked = mask_api_key(api_key) if api_key else None
         model = self._cfg.get_ai_model(active_prov)
         base_url = self._cfg.get_ai_base_url(active_prov)
         env_file = (
             source
-            if source not in ("environment", "unset")
+            if source not in ("environment", "unset", "builtin")
             else str(
                 self._cfg.project_env_file
                 if self._cfg.project_env_file is not None and self._cfg.project_env_file.is_file()
@@ -188,7 +195,7 @@ class AIService:
             configured=configured,
             masked_key=masked,
             key_type=key_type,
-            source=source if active_prov != "ollama" else "local",
+            source=source if active_prov not in {"ollama", "builtin"} else "local",
             model=model,
             env_file=env_file,
             note=_build_env_note(active_prov, configured, key_type),
@@ -257,11 +264,11 @@ class AIService:
             saved_key = existing.get(_PROVIDER_KEY_VARS[active_prov], "").strip() or None
             if active_prov == "anthropic":
                 key_type = classify_anthropic_key(saved_key)
-            elif active_prov == "ollama":
+            elif active_prov in {"ollama", "builtin"}:
                 key_type = "local"
             else:
                 key_type = "standard" if saved_key else "unset"
-            configured = True if active_prov == "ollama" else bool(saved_key)
+            configured = True if active_prov in {"ollama", "builtin"} else bool(saved_key)
             saved_model = existing.get(
                 _PROVIDER_MODEL_VARS[active_prov], ""
             ).strip() or self._cfg.get_ai_model(active_prov)
@@ -311,7 +318,11 @@ class AIService:
 
             pretty = json.dumps(processed, indent=2)
             if len(pretty) > _MAX_ARTIFACT_CHARS:
-                pretty = pretty[:_MAX_ARTIFACT_CHARS] + "\n... [truncated]"
+                compact_json = json.dumps(processed, separators=(",", ":"))
+                if len(compact_json) <= _MAX_ARTIFACT_CHARS:
+                    pretty = compact_json
+                else:
+                    pretty = pretty[:_MAX_ARTIFACT_CHARS] + "\n... [truncated]"
 
             wrapped, warns = wrap_untrusted_telemetry(pretty, source=path.name)
             injection_warnings.extend(warns)
@@ -364,6 +375,47 @@ class AIService:
             "user_prompt": "\n\n".join(user_parts),
         }
 
+    def _resolve_active_client(
+        self,
+        *,
+        provider: str | None,
+        model: str | None,
+        base_url: str | None,
+        local_only: bool,
+        fallback_provider: str | None = None,
+    ) -> tuple[AIClientProtocol, str, str, str | None]:
+        """Resolve AI client, auto-falling back to `builtin` on an `sk-ant-admin*` key."""
+        active_prov = (provider or self._cfg.get_ai_provider()).strip().lower()
+        api_key, _ = self._cfg.get_ai_api_key(active_prov)
+        preflight_fallback: str | None = None
+
+        if (
+            active_prov == "anthropic"
+            and classify_anthropic_key(api_key) == "admin"
+            and self._transport is None
+            and not local_only
+            and not fallback_provider
+        ):
+            active_prov = "builtin"
+            api_key = None
+            preflight_fallback = "builtin"
+
+        client = build_ai_client(
+            self._cfg,
+            provider=active_prov,
+            api_key=api_key,
+            base_url=base_url if preflight_fallback is None else None,
+            local_only=local_only,
+            transport=self._transport,
+            sleeper=self._sleeper,
+        )
+        chosen_model = (
+            model.strip()
+            if (model and model.strip() and preflight_fallback is None)
+            else self._cfg.get_ai_model(active_prov)
+        )
+        return client, active_prov, chosen_model, preflight_fallback
+
     def _complete_with_fallback(
         self,
         *,
@@ -395,9 +447,19 @@ class AIService:
                 started,
                 error=str(primary_exc),
             )
-            if not fallback_provider or fallback_provider.strip().lower() == primary_provider:
+            auto_fb = (
+                "builtin"
+                if (self._transport is None and primary_provider != "builtin")
+                else None
+            )
+            effective_fb = (
+                fallback_provider.strip().lower()
+                if (fallback_provider and fallback_provider.strip())
+                else auto_fb
+            )
+            if not effective_fb or effective_fb == primary_provider:
                 raise
-            fb_prov = fallback_provider.strip().lower()
+            fb_prov = effective_fb
             fb_key, _ = self._cfg.get_ai_api_key(fb_prov)
             fb_client = build_ai_client(
                 self._cfg,
@@ -474,16 +536,12 @@ class AIService:
         if structured:
             system_prompt = f"{system_prompt}\n\n{STRUCTURED_OUTPUT_INSTRUCTIONS}"
 
-        active_prov = (provider or self._cfg.get_ai_provider()).strip().lower()
-        api_key, _ = self._cfg.get_ai_api_key(active_prov)
-        client = build_ai_client(
-            self._cfg,
-            provider=active_prov,
-            api_key=api_key,
+        client, active_prov, chosen_model, preflight_fb = self._resolve_active_client(
+            provider=provider,
+            model=model,
             base_url=base_url,
             local_only=local_only,
-            transport=self._transport,
-            sleeper=self._sleeper,
+            fallback_provider=fallback_provider,
         )
 
         artifact_paths, raw_objects, artifact_blocks, redactor, injection_warnings = (
@@ -506,10 +564,6 @@ class AIService:
         if artifact_blocks:
             prompt_parts.append("S1shell JSON artifacts:\n\n" + "\n\n".join(artifact_blocks))
         full_prompt = "\n\n".join(prompt_parts)
-
-        chosen_model = (
-            model.strip() if model and model.strip() else self._cfg.get_ai_model(active_prov)
-        )
 
         # Optional SQLite response cache (only for single-shot non-pipeline runs)
         cache_k: str | None = None
@@ -561,7 +615,7 @@ class AIService:
         pipeline_stages: list[AIPipelineStageResult] = []
         used_prov = active_prov
         used_model = chosen_model
-        fallback_used: str | None = None
+        fallback_used: str | None = preflight_fb
         in_tok = 0
         out_tok = 0
 
@@ -605,7 +659,7 @@ class AIService:
                     )
                 )
         else:
-            analysis_text, in_tok, out_tok, used_prov, used_model, fallback_used = (
+            analysis_text, in_tok, out_tok, used_prov, used_model, fb_used = (
                 self._complete_with_fallback(
                     primary_client=client,
                     primary_provider=active_prov,
@@ -617,6 +671,8 @@ class AIService:
                     system_prompt=system_prompt,
                 )
             )
+            if fb_used:
+                fallback_used = fb_used
 
         # Structured JSON validation + single automatic repair retry if malformed
         struct_data: dict[str, Any] | None = None
@@ -708,19 +764,11 @@ class AIService:
         custom_tool_runner: Callable[[str, dict[str, Any]], tuple[str, Any]] | None = None,
     ) -> AIInvestigationResult:
         """Run a bounded read-only ReAct investigation over artifacts & offline/passive tools."""
-        active_prov = (provider or self._cfg.get_ai_provider()).strip().lower()
-        api_key, _ = self._cfg.get_ai_api_key(active_prov)
-        client = build_ai_client(
-            self._cfg,
-            provider=active_prov,
-            api_key=api_key,
+        client, active_prov, chosen_model, _ = self._resolve_active_client(
+            provider=provider,
+            model=model,
             base_url=base_url,
             local_only=local_only,
-            transport=self._transport,
-            sleeper=self._sleeper,
-        )
-        chosen_model = (
-            model.strip() if model and model.strip() else self._cfg.get_ai_model(active_prov)
         )
         executor = (
             tool_executor
@@ -761,19 +809,11 @@ class AIService:
         in_stream = stdin if stdin is not None else sys.stdin
         out_stream = stdout if stdout is not None else sys.stdout
 
-        active_prov = (provider or self._cfg.get_ai_provider()).strip().lower()
-        api_key, _ = self._cfg.get_ai_api_key(active_prov)
-        client = build_ai_client(
-            self._cfg,
-            provider=active_prov,
-            api_key=api_key,
+        client, active_prov, chosen_model, _ = self._resolve_active_client(
+            provider=provider,
+            model=model,
             base_url=base_url,
             local_only=local_only,
-            transport=self._transport,
-            sleeper=self._sleeper,
-        )
-        chosen_model = (
-            model.strip() if model and model.strip() else self._cfg.get_ai_model(active_prov)
         )
 
         active_skill: AISkill | None = self.get_skill(skill) if skill else None

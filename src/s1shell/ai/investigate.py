@@ -277,7 +277,11 @@ def run_readonly_investigation(
             distilled = redactor.redact_artifact(distilled)
         pretty = json.dumps(distilled, indent=2)
         if len(pretty) > 8_000:
-            pretty = pretty[:8_000] + "\n... [truncated]"
+            compact_json = json.dumps(distilled, separators=(",", ":"))
+            if len(compact_json) <= 16_000:
+                pretty = compact_json
+            else:
+                pretty = pretty[:8_000] + "\n... [truncated]"
         wrapped, warns = wrap_untrusted_telemetry(pretty, source=path.name)
         injection_warnings.extend(warns)
         context_blocks.append(f"### Artifact: {path.name}\n{wrapped}")

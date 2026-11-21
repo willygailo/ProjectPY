@@ -200,6 +200,7 @@
         <tr><th>Generated (UTC)</th><td>{{ bundle.metadata.generated_at_utc }}</td></tr>
         <tr><th>Operator</th><td>{{ bundle.metadata.operator }}</td></tr>
         <tr><th>S1shell Version</th><td>{{ bundle.metadata.tool_version }}</td></tr>
+        <tr><th>Developer</th><td>Dev: Willy Gailo RVS</td></tr>
       </table>
 
       <h3>Scope Entries Referenced</h3>
@@ -375,6 +376,12 @@
         {% endif %}
         {% if prof.html.get("cloud_and_api_endpoints") %}
         <br><strong>Cloud Buckets &amp; API Endpoints:</strong> <code>{{ prof.html.cloud_and_api_endpoints | join(", ") }}</code>
+        {% endif %}
+        {% if prof.html.get("form_endpoints") %}
+        <br><strong>Forms &amp; Input Parameters:</strong> <code>{{ prof.html.form_endpoints | join("; ") }}</code>
+        {% endif %}
+        {% if prof.html.get("internal_leaks_and_comments") %}
+        <br><strong>Internal IPs / Hostnames &amp; Dev Comments:</strong> <code>{{ prof.html.internal_leaks_and_comments | join("; ") }}</code>
         {% endif %}
       </p>
       {% endif %}
