@@ -157,12 +157,14 @@ class AnthropicClient:
         cfg: RuntimeConfig,
         *,
         api_key: str,
+        workspace_id: str | None = None,
         base_url: str | None = None,
         transport: httpx.BaseTransport | None = None,
         sleeper: Callable[[float], None] | None = None,
     ) -> None:
         self._cfg = cfg
         self._api_key = api_key.strip()
+        self._workspace_id = workspace_id.strip() if workspace_id and workspace_id.strip() else None
         self._url = (base_url or cfg.anthropic_api_url).strip()
         self._transport = transport
         self._sleeper = sleeper
@@ -185,6 +187,8 @@ class AnthropicClient:
             "anthropic-version": ANTHROPIC_VERSION,
             "content-type": "application/json",
         }
+        if self._workspace_id:
+            headers["anthropic-workspace-id"] = self._workspace_id
         body: dict[str, Any] = {
             "model": model,
             "max_tokens": max_tokens,
@@ -206,7 +210,18 @@ class AnthropicClient:
             raise NetworkError(
                 "Anthropic API rejected the request (HTTP "
                 f"{resp.status_code}): Admin keys (`sk-ant-admin*`) cannot invoke "
-                "`/v1/messages` inference; configure a standard `sk-ant-api*` key."
+                "`/v1/messages` inference; configure a standard `sk-ant-api*` or "
+                "`sk-ant-usr*` key with `ANTHROPIC_WORKSPACE_ID`."
+            )
+
+        if (
+            resp.status_code == 400
+            and classify_anthropic_key(self._api_key) == "user"
+            and not self._workspace_id
+        ):
+            raise NetworkError(
+                "Anthropic API rejected `sk-ant-usr*` user key (HTTP 400): set "
+                "`ANTHROPIC_WORKSPACE_ID` via `s1shell ai env --workspace-id wrkspc_...`."
             )
 
         if resp.status_code != 200:
@@ -425,8 +440,14 @@ def build_ai_client(
                 "ANTHROPIC_API_KEY is not configured. Set it in .env or via "
                 "`s1shell ai env --set-key <KEY>`."
             )
+        workspace_id, _ = cfg.get_anthropic_workspace_id()
         return AnthropicClient(
-            cfg, api_key=api_key, base_url=url, transport=transport, sleeper=sleeper
+            cfg,
+            api_key=api_key,
+            workspace_id=workspace_id,
+            base_url=url,
+            transport=transport,
+            sleeper=sleeper,
         )
     if norm == "ollama":
         url = (base_url or cfg.get_ai_base_url("ollama")).strip()

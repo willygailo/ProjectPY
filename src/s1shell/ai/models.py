@@ -16,13 +16,14 @@ class AIEnvStatus:
 
     configured: bool
     masked_key: str | None
-    key_type: str  # unset | standard | admin | custom | local
+    key_type: str  # unset | standard | user | admin | custom | local
     source: str
     model: str
     env_file: str
     note: str
     provider: str = "anthropic"
     base_url: str = ""
+    workspace_id: str | None = None
     schema_version: str = SCHEMA_VERSION
     tool_version: str = __version__
     generated_at_utc: str = field(default_factory=utc_now_iso)

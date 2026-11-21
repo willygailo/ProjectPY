@@ -29,18 +29,24 @@ ENV/
 coverage.xml
 htmlcov/
 
-# Environment variables, API keys & local TLS keys
+# Environment variables, API keys & local TLS/signing keys
 .env
 .env.*
+.envrc
 !.env.example
 *.pem
 *.key
 *.p12
 *.pfx
+*.jks
+*.keystore
+credentials.json
+service-account*.json
 
 # S1shell local state, scope governance, cache & audit logs
 .s1shell/
 scope.yaml
+!scope.yaml.example
 audit.log
 *.db
 *.db-journal
@@ -49,23 +55,41 @@ audit.log
 *.sqlite
 *.sqlite3
 *.log
+.*.tmp
 
-# S1shell generated assessment bundles & client reports (prevent accidental leaks)
+# S1shell generated assessment bundles, scans, SBOMs & client reports (prevent accidental leaks)
+results/
 assessment-out/
 batch-out/
 assessments/
 reports/
 *.sarif
+*.cdx.json
+*.spdx.json
+sbom.json
 profile.json
 fingerprint.json
 cves.json
+intel.json
 assess.json
+remediation.json
 batch_summary.json
 batch_report.html
 report.html
 report.md
+hardening.md
+secrets_scan.json
+config_scan.json
+csp_analysis.json
+email_auth.json
 targets.txt
 in_scope_urls.txt
+candidates.txt
+*-candidates.txt
+target-scope.txt
+target-urls.txt
+S1SHELL_GUIDE.md
+S1SHELL_CHECK.md
 
 # Editor, IDE & OS metadata
 .vscode/

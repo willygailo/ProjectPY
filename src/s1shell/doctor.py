@@ -227,6 +227,7 @@ def run_doctor(cfg: RuntimeConfig) -> DoctorReport:
         )
 
     ant_key, ant_source = cfg.get_anthropic_api_key()
+    ant_ws, _ = cfg.get_anthropic_workspace_id()
     key_type = classify_anthropic_key(ant_key)
     if not ant_key:
         checks.append(
@@ -244,16 +245,31 @@ def run_doctor(cfg: RuntimeConfig) -> DoctorReport:
                 detail=(
                     f"ANTHROPIC_API_KEY set ({mask_api_key(ant_key)} via {ant_source}) — "
                     "Admin key (sk-ant-admin*) detected; /v1/messages inference requires a "
-                    "standard sk-ant-api* key"
+                    "standard sk-ant-api* key or sk-ant-usr* key + ANTHROPIC_WORKSPACE_ID"
+                ),
+            )
+        )
+    elif key_type == "user" and not ant_ws:
+        checks.append(
+            DoctorCheck(
+                name="anthropic_api_key",
+                status="warn",
+                detail=(
+                    f"ANTHROPIC_API_KEY set ({mask_api_key(ant_key)} via {ant_source}) — "
+                    "User key (sk-ant-usr*) requires ANTHROPIC_WORKSPACE_ID (`--workspace-id`)"
                 ),
             )
         )
     else:
+        ws_note = f", workspace={ant_ws}" if ant_ws else ""
         checks.append(
             DoctorCheck(
                 name="anthropic_api_key",
                 status="ok",
-                detail=f"ANTHROPIC_API_KEY set ({mask_api_key(ant_key)} via {ant_source})",
+                detail=(
+                    f"ANTHROPIC_API_KEY set ({mask_api_key(ant_key)}, type={key_type}, via "
+                    f"{ant_source}{ws_note})"
+                ),
             )
         )
 

@@ -983,6 +983,11 @@ def render_ai_env_status(
             f"| Key Type | `{result.key_type}` |",
             f"| Source | `{_md_cell(result.source)}` |",
             f"| Model | `{_md_cell(result.model)}` |",
+            *(
+                [f"| Workspace ID | `{_md_cell(result.workspace_id)}` |"]
+                if result.workspace_id
+                else []
+            ),
             f"| Env File | `{_md_cell(result.env_file)}` |",
             f"| Note | {_md_cell(result.note)} |",
         ]
@@ -999,6 +1004,8 @@ def render_ai_env_status(
     table.add_row("Key Type", result.key_type)
     table.add_row("Source", result.source)
     table.add_row("Model", result.model)
+    if result.workspace_id:
+        table.add_row("Workspace ID", result.workspace_id)
     table.add_row("Env File", result.env_file)
     table.add_row("Note", result.note)
     _emit_tables([table], console=console, out_file=out_file, stdout=stdout)

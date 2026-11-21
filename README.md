@@ -19,10 +19,12 @@
 
 <br />
 
-**Open-source defensive security assessment, passive OSINT, SBOM auditing, AI triage, and reporting CLI built for Kali Linux & Linux.**
+**Open-source defensive security assessment, local secret/IaC/SBOM scanning, deep CSP/email/CVSS analysis, passive OSINT, AI triage, and reporting CLI built for Kali Linux & Linux.**
 
 [⚡ Setup & Install](#part-1-setup--configuration) &nbsp;·&nbsp;
 [🔑 API Keys & Logins](#13-configure-optional-api-keys--ai-provider-env-atomic-0600) &nbsp;·&nbsp;
+[🔐 Local Scan (`scan`)](#43-local-secret-scanning-iacconfig-auditing--cyclonedx-15-sbom-s1shell-scan) &nbsp;·&nbsp;
+[🔬 Deep Analyzers (`analyze`)](#44-deep-offline-csp3-email-auth-header--cvss-analyzers-s1shell-analyze) &nbsp;·&nbsp;
 [🌐 Online MCP](#online-and-local-mcp-server-s1shell-mcp-serve) &nbsp;·&nbsp;
 [🧅 Tor Routing](#defensive-tor-routing) &nbsp;·&nbsp;
 [🎯 Pentesting Guide (`target.com`)](#part-2-pentesting--assessment-guide-example-httpswwwtargetcom) &nbsp;·&nbsp;
@@ -71,12 +73,22 @@ flowchart LR
   </tr>
   <tr>
     <td width="50%" valign="top">
-      <h3>🧬 81 Passive Fingerprints &amp; Offline EOL DB</h3>
-      Identifies web servers, CDNs, WAFs, DevOps platforms, frameworks, and client-side JS libraries (<code>jQuery</code>, <code>Bootstrap</code>, <code>Lodash</code>, <code>Moment.js</code>, <code>DOMPurify</code>, <code>Handlebars</code>, <code>Axios</code>, <code>Swagger UI</code>) with CPE 2.3 correlation, offline <b>End-of-Life (<code>EOL-001</code>)</b> detection, and custom <code>~/.s1shell/signatures.d/*.yaml</code> rules.
+      <h3>🧬 81 Passive Fingerprints &amp; 30-Product Offline EOL DB</h3>
+      Identifies web servers, CDNs, WAFs, DevOps platforms, frameworks, and client-side JS libraries (<code>jQuery</code>, <code>Bootstrap</code>, <code>Lodash</code>, <code>Moment.js</code>, <code>DOMPurify</code>, <code>Handlebars</code>, <code>Axios</code>, <code>Swagger UI</code>) with CPE 2.3 correlation, expanded offline <b>End-of-Life (<code>EOL-001</code>)</b> detection (NGINX, Apache, PHP, Python, Node.js, OpenSSL, Envoy, Traefik, Varnish, Django, Rails, Laravel, Next.js, PostgreSQL, MySQL, Redis, OpenSSH, Grafana, Jenkins, etc.), and custom <code>~/.s1shell/signatures.d/*.yaml</code> rules.
     </td>
     <td width="50%" valign="top">
       <h3>📦 CVE, KEV, EPSS, GHSA &amp; 14-Format SBOM Audit</h3>
-      NVD 2.0 + CVE.org + GHSA + CISA KEV + FIRST EPSS with SSVC <code>P0-IMMEDIATE</code>..<code>P3-MONITOR</code> tiers &amp; pure-Python CVSS v3.1 scoring, plus recursive zero-contact <b>OSV.dev</b> lockfile &amp; CycloneDX / <b>SPDX 2.3</b> SBOM auditing with semantic highest-version upgrade commands.
+      NVD 2.0 + CVE.org + GHSA + CISA KEV + FIRST EPSS with SSVC <code>P0-IMMEDIATE</code>..<code>P3-MONITOR</code> tiers &amp; pure-Python CVSS v3.0/v3.1 Base/Temporal/Environmental scoring, plus recursive zero-contact <b>OSV.dev</b> lockfile &amp; CycloneDX / <b>SPDX 2.3</b> SBOM auditing with semantic highest-version upgrade commands.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <h3>🔐 Local Secret, IaC/Config &amp; CycloneDX 1.5 SBOM Scanner (<code>scan</code>)</h3>
+      Zero-network local repository &amp; git-diff security scanner: <b>27+ redacted secret detectors</b> (AWS/GCP/Azure/GitHub/GitLab/Anthropic/OpenAI/Stripe/Slack/DB URIs/PEM keys + Shannon entropy &amp; <code>--git-staged</code>), <b>IaC &amp; config auditor</b> (Dockerfiles, K8s manifests, GitHub Actions pwn-request/expression-injection, Docker Compose, NGINX, <code>.env</code>, <code>sshd_config</code>) with line/column-accurate <b>SARIF 2.1.0</b> &amp; <code>--fail-on</code> CI gates, plus <b>CycloneDX 1.5 SBOM generation</b>.
+    </td>
+    <td width="50%" valign="top">
+      <h3>🔬 Deep CSP3, Email Auth, Offline Header &amp; CVSS Analyzers (<code>analyze</code>)</h3>
+      Purpose-built security analyzers: <b>CSP3 Evaluator</b> (28-domain JSONP/script-gadget bypass DB, duplicate/typo directives, nonce entropy, hardened rewrite), <b>Email Spoofing Defense Auditor</b> (SPF IPv4 CIDR blast radius &amp; lookup budget, DMARC alignment, cryptographic DKIM DER key bit-length check), <b>100%-offline raw HTTP header posture scorer</b>, and <b>FIRST CVSS v3.0/v3.1 + v4.0 calculator</b>.
     </td>
   </tr>
   <tr>
@@ -86,7 +98,7 @@ flowchart LR
     </td>
     <td width="50%" valign="top">
       <h3>🔧 Playbooks, Presets, Drift Diffs &amp; SARIF</h3>
-      Posture presets (<code>web</code>, <code>api</code>, <code>strict</code>), transparent waivers (<code>--ignore-finding</code>), OWASP Top 10:2021 / ASVS / CWE / NIST 800-53 mapping, offline config snippets (<code>nginx</code>, <code>apache</code>, <code>caddy</code>, <code>express</code>, <code>dns</code>, <code>security.txt</code>), <code>diff --fail-on-regression</code>, and CI gates (<code>exit 4</code>).
+      Posture presets (<code>web</code>, <code>api</code>, <code>strict</code>), transparent waivers (<code>--ignore-finding</code>), OWASP Top 10:2021 / ASVS / CWE / NIST 800-53 mapping, offline config snippets (<code>nginx</code>, <code>apache</code>, <code>caddy</code>, <code>express</code>, <code>cloudflare</code>, <code>traefik</code>, <code>dns</code>, <code>security.txt</code>, CORS/SRI/OIDC/LEAK), <code>diff --fail-on-regression</code>, and CI gates (<code>exit 4</code>).
     </td>
   </tr>
   <tr>
@@ -96,13 +108,13 @@ flowchart LR
     </td>
     <td width="50%" valign="top">
       <h3>🧠 Defensive AI Skills, Pipelines &amp; ReAct Copilot</h3>
-      Air-gapped <b>Ollama</b> (<code>--local-only</code>), <b>Anthropic</b>, <b>OpenAI-compat</b>, &amp; <b>Gemini</b> with <b>9 defensive AI skills</b> (+ custom <code>~/.s1shell/skills.d/*.yaml</code>), <code>--pipeline</code> workflows, <code>--structured</code> JSON, nonce-tagged prompt-injection guardrails, reversible NDA redaction (<code>--redact --restore</code>), citation grounding checks, bounded read-only <code>ai investigate</code> &amp; <code>ai chat</code>.
+      Offline <b>Builtin</b> tactical synthesizer, air-gapped <b>Ollama</b> (<code>--local-only</code>), <b>Anthropic</b> (<code>sk-ant-api*</code> &amp; <code>sk-ant-usr*</code> + <code>ANTHROPIC_WORKSPACE_ID</code>), <b>OpenAI-compat</b>, &amp; <b>Gemini</b> with <b>10 defensive AI skills</b> (+ custom <code>~/.s1shell/skills.d/*.yaml</code>), <code>--pipeline</code> workflows, <code>--structured</code> JSON, nonce-tagged prompt-injection guardrails, reversible NDA redaction (<code>--redact --restore</code>), citation grounding checks, bounded read-only <code>ai investigate</code> (<b>14 tools</b>) &amp; <code>ai chat</code>.
     </td>
   </tr>
   <tr>
     <td width="50%" valign="top">
       <h3>📡 Online Streamable HTTP &amp; Local Stdio MCP</h3>
-      Pure-stdlib MCP <code>2025-03-26</code> server (<code>s1shell mcp serve|config|ping</code>) exposing <b>23 default read-only tools</b> (+3 opt-in scoped target tools = <b>26</b>), <b>4 live Resources</b>, and <b>9+ native Prompts</b>, hardened with Bearer auth, <code>Origin</code> DNS-rebinding guard, and <code>/healthz</code>.
+      Pure-stdlib MCP <code>2025-03-26</code> server (<code>s1shell mcp serve|config|ping</code>) exposing <b>30 default read-only tools</b> (+3 opt-in scoped target tools = <b>33</b>), <b>4 live Resources</b>, and <b>10+ native Prompts</b>, hardened with Bearer auth, <code>Origin</code> DNS-rebinding guard, and <code>/healthz</code>.
     </td>
     <td width="50%" valign="top">
       <h3>🧅 Zero-Leak Defensive Tor (<code>socks5h://</code>) &amp; v3 <code>.onion</code></h3>
@@ -202,15 +214,15 @@ s1shell --check           # live local diagnostics (doctor) + complete CLI usage
 s1shell help              # CLI overview, all modules, workflows, flags, & exit codes
 s1shell help assess       # detailed options & copy-paste examples for any module
 s1shell help --all        # complete CLI reference manual (supports --format md --out GUIDE.md)
-s1shell doctor            # expected: healthy=True, 35 scope entries, 81 signatures, 9 AI skills
-s1shell scope list        # expected: 35 active TLD & localhost rules (.com, .ph, .com.ph, .gov.ph, ...)
-s1shell ai skills list    # expected: 9 bundled defensive AI skills
+s1shell doctor            # expected: healthy=True, active scope entries, 81 signatures, 10 AI skills
+s1shell scope list        # expected: active TLD & localhost rules (.com, .ph, .com.ph, .gov.ph, ...)
+s1shell ai skills list    # expected: 10 bundled defensive AI skills
 s1shell tor status        # offline check for local Tor daemon & socksio readiness
 s1shell audit verify      # expected: Audit Log Integrity: VALID
 ```
 
 > [!NOTE]
-> If `s1shell doctor` shows `WARN` on `anthropic_api_key`, verify your `.env` contains a standard `sk-ant-api*` inference key (not an `sk-ant-admin*` admin key) — or switch to local air-gapped Ollama via `s1shell ai env --provider ollama`.
+> If `s1shell doctor` shows `WARN` on `anthropic_api_key`, verify your `.env` contains either a workspace-scoped `sk-ant-api03-*` key or a user-scoped `sk-ant-usr-*` key paired with `ANTHROPIC_WORKSPACE_ID` (`s1shell ai env --workspace-id wrkspc_...`) — not an `sk-ant-admin*` admin key. You can also run zero-cost offline analysis with `--provider builtin` or air-gapped Ollama (`s1shell ai env --provider ollama`).
 
 ### 1.3 Configure Optional API Keys & AI Provider (`.env`, Atomic `0600`)
 
@@ -226,7 +238,7 @@ All API keys are **optional** — S1shell works out of the box with unauthentica
 | **GreyNoise Community** | `--set-greynoise-key` / `GREYNOISE_API_KEY` | [Sign Up](https://viz.greynoise.io/signup) · [Account API Key](https://viz.greynoise.io/account/api-key) | Passive IP scanner noise & benign RIOT lookup |
 | **urlscan.io** | `--set-urlscan-key` / `URLSCAN_API_KEY` | [Sign Up](https://urlscan.io/signup) · [Settings & API](https://urlscan.io/user/#settings) | Strictly passive historical Search API index lookup |
 | **Ollama (Local AI)** | `--provider ollama` | [Download Ollama](https://ollama.com/download) *(no account / no key needed)* | Air-gapped local LLM triage with zero cloud telemetry |
-| **Anthropic Claude** | `--provider anthropic` / `ANTHROPIC_API_KEY` | [Anthropic Console Keys](https://console.anthropic.com/settings/keys) *(use `sk-ant-api*`, not `sk-ant-admin*`)* | Cloud defensive AI triage & remediation |
+| **Anthropic Claude** | `--provider anthropic` / `ANTHROPIC_API_KEY`, `ANTHROPIC_WORKSPACE_ID` (`--workspace-id`), `ANTHROPIC_MODEL` | [Anthropic Console Keys](https://console.anthropic.com/settings/keys) *(use `sk-ant-api03-*`, or `sk-ant-usr-*` + `--workspace-id wrkspc_...`; not `sk-ant-admin*`)* | Cloud defensive AI triage & remediation (e.g. `claude-sonnet-5-5`, `claude-sonnet-4-5`) |
 | **OpenAI-Compatible** | `--provider openai_compat` / `OPENAI_API_KEY` | [OpenAI API Keys](https://platform.openai.com/api-keys) | OpenAI, OpenRouter, LiteLLM, or vLLM inference |
 | **Google Gemini** | `--provider gemini` / `GEMINI_API_KEY` | [Google AI Studio API Keys](https://aistudio.google.com/apikey) | Google Gemini defensive AI inference |
 | **Online MCP Server** | `--token` / `S1SHELL_MCP_TOKEN` | Local random secret *(or `--generate-token`)* | Required Bearer auth for non-loopback `--transport http` MCP binds |
@@ -251,7 +263,12 @@ s1shell intel env
 s1shell ai env --provider ollama --model "llama3.1:8b"
 
 # Or configure a cloud AI provider (Anthropic / OpenAI-compatible / Gemini):
-# s1shell ai env --provider anthropic --set-key "sk-ant-api03-..." --model "claude-sonnet-4-20250514"
+# Workspace-scoped Anthropic key (`sk-ant-api03-...`):
+# s1shell ai env --provider anthropic --set-key "sk-ant-api03-..." --model "claude-sonnet-5-5"
+# User-scoped Anthropic key (`sk-ant-usr-...`) with Workspace ID:
+# s1shell ai env --provider anthropic --set-key "sk-ant-usr-..." --workspace-id "wrkspc_..." --model "claude-sonnet-5-5"
+# Built-in offline tactical synthesizer (zero API key / zero network):
+# s1shell ai env --provider builtin
 # s1shell ai env --provider openai_compat --set-key "sk-..." --model "gpt-4o-mini"
 # s1shell ai env --provider gemini --set-key "AIza..." --model "gemini-2.5-flash"
 ```
@@ -298,7 +315,7 @@ signatures:
 <details>
 <summary><b>🧠 Custom Defensive AI Skills (<code>~/.s1shell/skills.d/</code>)</b></summary>
 
-Drop any `*.yaml` file into `~/.s1shell/skills.d/` to add or override S1shell's 9 built-in defensive AI skills (`s1shell ai skills list`):
+Drop any `*.yaml` file into `~/.s1shell/skills.d/` to add or override S1shell's 10 built-in defensive AI skills (`s1shell ai skills list`):
 
 ```yaml
 skills:
@@ -316,9 +333,9 @@ skills:
 
 <a id="online-and-local-mcp-server-s1shell-mcp-serve"></a>
 <details open>
-<summary><b>🌐 Online &amp; Local Read-Only MCP Server (<code>s1shell mcp serve</code> — Streamable HTTP + Stdio, 23–26 Tools)</b></summary>
+<summary><b>🌐 Online &amp; Local Read-Only MCP Server (<code>s1shell mcp serve</code> — Streamable HTTP + Stdio, 30–33 Tools)</b></summary>
 
-S1shell runs as a **live online MCP server** (MCP `2025-03-26` + `2024-11-05` compatible) over **Online Streamable HTTP** (`--transport http`) or **Local Stdio** (`--transport stdio`), exposing **23 default online/offline read-only tools**, **4 live MCP Resources**, and **9+ native MCP Prompts** (your defensive AI skills):
+S1shell runs as a **live online MCP server** (MCP `2025-03-26` + `2024-11-05` compatible) over **Online Streamable HTTP** (`--transport http`) or **Local Stdio** (`--transport stdio`), exposing **30 default online/offline read-only tools**, **4 live MCP Resources**, and **10+ native MCP Prompts** (your defensive AI skills):
 
 #### Start the Online Streamable HTTP MCP Server
 
@@ -351,9 +368,10 @@ s1shell mcp config antigravity --transport http --url http://127.0.0.1:8765/mcp 
 | **Live Passive Intel &amp; OSINT** | Online (zero target contact) | `s1shell_intel_lookup` (VT, GreyNoise, urlscan.io, RDAP), `s1shell_intel_advisory` (GHSA), `s1shell_intel_ct` (`crt.sh`), `s1shell_intel_rdap` |
 | **Live CVE &amp; SBOM Feeds** | Online (zero target contact) | `s1shell_cve_search` (NVD 2.0 + KEV/EPSS), `s1shell_cve_get` (NVD + CVE.org + GHSA), `s1shell_cve_audit` (OSV.dev across 14 lockfile/SBOM formats + `recursive`) |
 | **Defensive AI &amp; Skills** | Online / Local Ollama | `s1shell_ai_analyze` (skills, pipelines, NDA redaction on by default, grounding check), `s1shell_ai_skills_list`, `s1shell_ai_prepare_context` |
+| **Local Scanners &amp; Deep Analyzers** | Offline *(optional passive DNS for `email`)* | `s1shell_scan_secrets` (27+ redacted secret detectors + git diffs), `s1shell_scan_config` (Docker/K8s/GHA/Compose/NGINX/SSHd/`.env`), `s1shell_scan_sbom` (CycloneDX 1.5), `s1shell_analyze_csp` (CSP3 bypass evaluator), `s1shell_analyze_email` (SPF/DMARC/DKIM), `s1shell_analyze_headers` (offline HTTP posture), `s1shell_analyze_cvss` (CVSS v3.x/v4.0) |
 | **Governance, Analysis &amp; Codec** | Online DNS / Offline | `s1shell_doctor`, `s1shell_tor_status`, `s1shell_scope_list`, `s1shell_scope_check`, `s1shell_audit_list`, `s1shell_audit_verify`, `s1shell_fingerprint_from_profile`, `s1shell_assess_diff`, `s1shell_remediate`, `s1shell_codec_decode`, `s1shell_codec_encode`, `s1shell_codec_inspect`, `s1shell_codec_hash` |
 | **Scoped Target Tools *(Opt-In)*** | Online *(requires `--allow-scoped-targets --authorized`)* | `s1shell_profile`, `s1shell_fingerprint`, `s1shell_assess` — fail-closed `scope.yaml` + SHA-256 `audit.log` on every call |
-| **Native MCP Resources &amp; Prompts** | Built-in | Resources: `s1shell://doctor`, `s1shell://scope`, `s1shell://skills`, `s1shell://audit/recent` · Prompts: all 9 bundled + custom `~/.s1shell/skills.d/*.yaml` skills |
+| **Native MCP Resources &amp; Prompts** | Built-in | Resources: `s1shell://doctor`, `s1shell://scope`, `s1shell://skills`, `s1shell://audit/recent` · Prompts: all 10 bundled + custom `~/.s1shell/skills.d/*.yaml` skills |
 
 #### Client Configuration Snippets (Online HTTP vs Local Stdio)
 
@@ -525,7 +543,7 @@ Target Identity, Contacts (Email / Gmail / Phone) & Surface Entities: https://ww
 
 | Mode | Scope & `--authorized` Required? | Commands |
 | --- | --- | --- |
-| **Zero-Target-Contact (Passive / Offline)** | No — never sends packets to `target.com` | `intel ct\|rdap\|lookup\|advisory`, `cve search\|get\|audit`, `codec decode\|encode\|inspect\|hash`, `fingerprint --from-profile`, `remediate`, `diff`, `report build`, `ai env\|skills\|analyze\|investigate\|chat`, `tor status\|check`, `mcp serve\|config\|ping` *(default)*, `audit`, `doctor` |
+| **Zero-Target-Contact (Passive / Offline)** | No — never sends packets to `target.com` | `scan secrets\|config\|sbom`, `analyze csp\|email\|headers\|cvss`, `intel ct\|rdap\|lookup\|advisory`, `cve search\|get\|audit`, `codec decode\|encode\|inspect\|hash`, `fingerprint --from-profile`, `remediate`, `diff`, `report build`, `ai env\|skills\|analyze\|investigate\|chat`, `tor status\|check`, `mcp serve\|config\|ping` *(default)*, `audit`, `doctor` |
 | **Authorized Target Mode (Read-Only)** | **Yes** — must match `scope.yaml` + `--authorized` | `assess <target \| --targets-file>`, `profile <target>`, `fingerprint <target>`, `mcp serve --allow-scoped-targets --authorized` *(opt-in)* |
 | **Tor Zero-Leak Modes *(Optional)*** | `--tor` (no target scope) · `--tor --tor-targets` (**Yes** + public/v3 `.onion` only) | Add `--tor` for passive OSINT/CVE/SBOM/Cloud AI OPSEC; add `--tor --tor-targets --authorized` to route target DoH DNS, SOCKS5h TLS, & single-GET HTTP through Tor |
 
@@ -692,7 +710,44 @@ s1shell cve audit ./target-repo --recursive --enrich --format sarif --out ./resu
 s1shell cve audit sbom.spdx.json --enrich --kev-only
 ```
 
-#### 4.3 Offline Decoding, Token/Cert Inspection & Hashing (`s1shell codec`)
+#### 4.3 Local Secret Scanning, IaC/Config Auditing & CycloneDX 1.5 SBOM (`s1shell scan`)
+
+100% offline local repository & CI/CD security scanning with line/column-accurate **SARIF 2.1.0** output and `--fail-on` policy gates (`exit 4`):
+
+```bash
+# Scan a repository or staged git changes for exposed credentials (strictly redacted output)
+s1shell scan secrets ./target-repo --fail-on HIGH --format sarif --out ./results/secrets.sarif
+s1shell scan secrets . --git-staged --fail-on HIGH
+s1shell scan secrets . --git-diff main...HEAD
+
+# Audit Dockerfiles, Kubernetes manifests, GitHub Actions, Docker Compose, NGINX, SSHd & .env
+s1shell scan config ./target-repo --fail-on HIGH --format sarif --out ./results/iac.sarif
+
+# Generate a CycloneDX 1.5 JSON SBOM from lockfiles/manifests/Dockerfiles and audit via OSV.dev
+s1shell scan sbom ./target-repo --raw-bom --out ./results/sbom.cdx.json
+s1shell cve audit ./results/sbom.cdx.json --enrich --fail-on HIGH
+```
+
+#### 4.4 Deep Offline CSP3, Email Auth, Header & CVSS Analyzers (`s1shell analyze`)
+
+```bash
+# Evaluate a Content-Security-Policy for JSONP/CDN script gadgets, duplicates, typos & hardened rewrite
+s1shell analyze csp "default-src 'self'; script-src 'unsafe-inline' https://cdn.jsdelivr.net"
+s1shell analyze csp --from-profile ./results/target-com/assess.json
+
+# Audit SPF IPv4 CIDR blast radius & lookup budget, DMARC alignment & DKIM DER RSA/Ed25519 key bits
+s1shell analyze email target.com --selector google
+s1shell analyze email target.com --offline --spf "v=spf1 ip4:10.0.0.0/16 ~all" --dmarc "v=DMARC1; p=none"
+
+# Audit raw HTTP response headers from curl/Burp/DevTools completely offline (scores, fingerprints & fixes)
+curl -sI https://www.target.com | s1shell analyze headers - --url https://www.target.com/
+s1shell analyze headers --file ./captured-headers.txt --preset strict
+
+# Calculate & decode FIRST CVSS v3.0/v3.1 (Base + Temporal + Environmental) and v4.0 metric vectors
+s1shell analyze cvss "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/E:P/RL:O/RC:C"
+```
+
+#### 4.5 Offline Decoding, Token/Cert Inspection & Hashing (`s1shell codec`)
 
 ```bash
 # Magic auto-decode (default `-e auto` peels nested URL -> Base64 -> Gzip -> JSON)
@@ -750,11 +805,11 @@ s1shell codec hash --file ./results/target-com/report.html
 </details>
 
 ```bash
-# 1. Deterministic offline hardening snippets (nginx, apache, caddy, express, dns, security.txt)
+# 1. Deterministic offline hardening snippets (nginx, apache, caddy, express, cloudflare, traefik, dns, security.txt)
 s1shell remediate ./results/target-com/assess.json \
   --stack auto --format md --out ./results/target-com/hardening.md
 
-# 2. Advanced defensive AI tactics (9 skills, multi-stage pipelines, reversible NDA redaction, grounding check)
+# 2. Advanced defensive AI tactics (10 skills, multi-stage pipelines, reversible NDA redaction, grounding check)
 s1shell ai skills list
 s1shell ai skills show attack-path-modeling
 
@@ -762,7 +817,7 @@ s1shell ai skills show attack-path-modeling
 s1shell ai analyze \
   --input ./results/target-com/assess.json \
   --skill attack-path-modeling --redact --restore --cache \
-  --fallback ollama --format md --out ./results/target-com/ai_attack_paths.md
+  --fallback builtin --format md --out ./results/target-com/ai_attack_paths.md
 
 # Multi-stage defensive pipeline (deep-triage | purple-team | executive-pack) or validated JSON (--structured)
 s1shell ai analyze \
@@ -773,7 +828,7 @@ s1shell ai analyze \
   --input ./results/target-com/assess.json \
   --skill pentest-report-writer --structured --local-only --provider ollama
 
-# Bounded read-only ReAct investigator (strictly allowlisted to 9 offline/passive tools, max 8 steps)
+# Bounded read-only ReAct investigator (strictly allowlisted to 14 offline/passive tools, max 8 steps)
 s1shell ai investigate \
   --input ./results/target-com \
   --goal "Correlate detected EOL/CVE risks with passive RDAP & CT context and prioritize fixes" \
@@ -810,8 +865,10 @@ s1shell audit verify
 ### CI/CD & GitHub Code Scanning (SARIF 2.1.0)
 
 ```yaml
-- name: Run S1shell Dependency & Authorized Target Gate
+- name: Run S1shell Secret, IaC, Dependency & Authorized Target Gates
   run: |
+    s1shell scan secrets . --fail-on HIGH --format sarif --out secrets.sarif
+    s1shell scan config . --fail-on HIGH --format sarif --out iac.sarif
     s1shell cve audit requirements.txt --enrich --format sarif --out deps.sarif --fail-on HIGH
     s1shell assess https://www.target.com --authorized \
       --preset api --fail-on HIGH --min-score 80 --format sarif --out target.sarif
@@ -832,7 +889,8 @@ s1shell audit verify
 | `exit 3` (`UnauthorizedError`) | Running a target command non-interactively without confirmation | Pass `--authorized` explicitly |
 | `exit 4` (`PolicyGateError`) | Findings breached `--fail-on`, `--min-score`, or `--fail-on-regression` | Expected CI/CD gate failure — review findings or adjust thresholds / `--ignore-finding <ID>` |
 | Intel/AI feed skipped or rate-limited | Missing or misconfigured API key in `.env` | Run `s1shell doctor` and `s1shell intel env` / `s1shell ai env` to check masked key status |
-| `anthropic_api_key: WARN (sk-ant-admin*)` | `.env` contains an Anthropic Admin key instead of a standard inference key | Replace with a standard `sk-ant-api*` key from [Anthropic Console](https://console.anthropic.com/settings/keys), or switch to local Ollama (`s1shell ai env --provider ollama`) |
+| `anthropic_api_key: WARN (sk-ant-admin*)` | `.env` contains an Anthropic Admin key instead of an inference key | Replace with a workspace-scoped `sk-ant-api03-*` key, or a user-scoped `sk-ant-usr-*` key + `--workspace-id wrkspc_...`, or use offline `--provider builtin` / `--provider ollama` |
+| `Anthropic HTTP 400: not scoped to a workspace` / `credit balance is too low` | `sk-ant-usr-*` key missing `ANTHROPIC_WORKSPACE_ID` or Anthropic Console API billing balance is empty *(separate from claude.ai Pro/Max)* | Set `s1shell ai env --workspace-id wrkspc_...` (using a standard workspace, not the managed Claude Code workspace) and add API credits in Console Plans & Billing, or use `--provider builtin` / `--provider ollama` |
 | `Tor SOCKS5h routing requires socksio` | Existing `pipx` venv installed before `httpx[http2,socks]` was added | Run `pipx inject s1shell socksio` (or `pip install 'httpx[http2,socks]'`) and re-check with `s1shell tor status` |
 | `Tor SOCKS5h proxy is unreachable (fail-closed)` | Local Tor daemon is stopped (S1shell refuses to silently fall back to clearnet) | Start Tor via `sudo systemctl enable --now tor` (or pass `--tor-proxy socks5h://127.0.0.1:9150` for Tor Browser) and verify with `s1shell tor check` |
 | MCP HTTP `401 Unauthorized` or `403 Forbidden Origin` | Missing/wrong Bearer token or un-allowlisted browser `Origin` header | Pass `--token` / set `S1SHELL_MCP_TOKEN`, and pass `--allow-origin https://your-client.example` for web MCP clients |
@@ -840,23 +898,25 @@ s1shell audit verify
 ### Command, Flag & Exit-Code Reference
 
 <details open>
-<summary><b>📋 Modules &amp; Commands (16 Modules)</b></summary>
+<summary><b>📋 Modules &amp; Commands (18 Modules)</b></summary>
 
 | Command | Network Contact | Purpose |
 | --- | --- | --- |
 | `s1shell assess <target \| --targets-file>` | Scoped target + NVD/KEV/EPSS (+ optional VT/GN/urlscan/RDAP with `--intel`) | Unified profile, fingerprint, EOL, CVE, intel, posture, playbook, & report bundle |
+| `s1shell scan secrets \| config \| sbom` | None (offline) | Local 27+ redacted secret/git-diff scanner, IaC/config auditor (Docker/K8s/GHA/Compose/NGINX/SSHd/`.env`) with line-accurate SARIF 2.1.0, & CycloneDX 1.5 SBOM generator |
+| `s1shell analyze csp \| email \| headers \| cvss` | None *(optional passive DNS for `email`)* | CSP3 bypass-gadget evaluator, SPF/DMARC/DKIM key-strength auditor, offline raw HTTP header posture scorer, & FIRST CVSS v3.0/v3.1/v4.0 calculator |
 | `s1shell scope add \| import \| list \| check \| remove \| expire` | DNS on `check` only (DoH-over-Tor with `--tor --tor-targets`; zero DNS on `.onion`) | Manage authorized allow/exclude rules (domain, IP, CIDR, URL prefix, v3 `.onion`) & bulk imports |
 | `s1shell cve search \| get \| audit \| cache clear` | Public NVD / CVE.org / OSV.dev / GHSA / KEV / EPSS | CVE lookup, SSVC priority triage, & recursive lockfile/SBOM auditing |
 | `s1shell intel env \| lookup \| advisory \| ct \| rdap` | Public VT / GreyNoise / urlscan Search / GHSA / crt.sh / RDAP | Zero-target-contact passive threat intel, CT logs, RDAP (org, emails, phones, entities; auto subdomain-to-apex fallback), & `.env` key manager |
 | `s1shell codec decode \| encode \| inspect \| hash` | None (offline) | Offline Base64/Hex/URL/SAML/JWT/X.509/Gzip/Auto decoder, encoder, inspector, & hashes |
 | `s1shell profile <target>` | Single target (1 GET + TLS + opt-in checks) | Recursive SPF/DNS, TLS chain/Subject/Serial/SPKI, CSP v2, passive emails/Gmail, phones, keys/IDs, names/JSON-LD, social links, cloud buckets, API paths, OIDC/JWKS, `OPTIONS` |
-| `s1shell fingerprint [<target> \| --from-profile FILE]` | None (`--from-profile`) or 1 GET | Passive server/CDN/WAF/JS-library identification with CPE 2.3 & offline EOL flags |
-| `s1shell remediate <assess.json>` | None (offline) | Deterministic stack-tailored hardening config generator |
+| `s1shell fingerprint [<target> \| --from-profile FILE]` | None (`--from-profile`) or 1 GET | Passive server/CDN/WAF/JS-library identification with CPE 2.3 & 30-product offline EOL flags |
+| `s1shell remediate <assess.json>` | None (offline) | Deterministic stack-tailored hardening config generator (`nginx`, `apache`, `caddy`, `express`, `cloudflare`, `traefik`, `dns`, `security.txt`) |
 | `s1shell diff <base.json> <curr.json>` | None (offline) | Security posture drift detection & CI regression gate |
 | `s1shell report build` | None (offline) | Compile artifacts into JSON, Markdown, SARIF 2.1.0, or HTML |
-| `s1shell ai env \| skills \| analyze \| investigate \| chat` | Configured AI endpoint (or `--local-only` Ollama) | Defensive AI skills library, multi-stage pipelines, reversible NDA redaction, grounding checks, read-only ReAct investigator & copilot |
+| `s1shell ai env \| skills \| analyze \| investigate \| chat` | Configured AI endpoint (or offline `builtin` / `--local-only` Ollama) | 10 defensive AI skills, multi-stage pipelines, reversible NDA redaction, grounding checks, 14-tool read-only ReAct investigator & copilot |
 | `s1shell audit list \| verify` | None (offline) | Inspect & verify SHA-256 hash chain integrity of `audit.log` |
-| `s1shell mcp serve \| config \| ping` | Online HTTP / Stdio (intel + AI; opt-in scoped targets) | Online Streamable HTTP & local stdio MCP server (23–26 tools, Resources, Prompts, Bearer auth, Origin guard), client config generator, & live ping |
+| `s1shell mcp serve \| config \| ping` | Online HTTP / Stdio (intel + AI; opt-in scoped targets) | Online Streamable HTTP & local stdio MCP server (30–33 tools, Resources, Prompts, Bearer auth, Origin guard), client config generator, & live ping |
 | `s1shell tor status \| check` | Offline (`status`) / Tor exit check (`check`) | Check local Tor SOCKS5h readiness or verify live Tor exit egress (fail-closed) |
 | `s1shell doctor` / `s1shell --check` / `s1shell help [module] [--all]` | None (offline) | Local environment diagnostics, complete CLI usage guide & module manual |
 | `s1shell completion {bash,zsh,fish}` | None (offline) | Shell tab-completion scripts |
@@ -870,7 +930,7 @@ s1shell audit verify
 
 | Flag | Description |
 | --- | --- |
-| `--format {table,json,md,html,sarif}` | Output format (`html` on `report build` / `assess`; `sarif` on `report build` / `assess` / `cve audit`) |
+| `--format {table,json,md,html,sarif}` | Output format (`html` on `report build` / `assess`; `sarif` on `report build` / `assess` / `cve audit` / `scan secrets` / `scan config`) |
 | `--out FILE` | Write output to `FILE` instead of stdout |
 | `--authorized` | Non-interactive authorization confirmation for target-touching commands |
 | `--scope-file FILE` | Override path to `scope.yaml` |

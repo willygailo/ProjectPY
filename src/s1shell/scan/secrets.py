@@ -187,9 +187,9 @@ _SECRET_RULES: tuple[_SecretRule, ...] = (
     ),
     _SecretRule(
         rule_id="SEC-AI-001",
-        title="Anthropic API or Admin key exposed",
+        title="Anthropic API, User, or Admin key exposed",
         severity="CRITICAL",
-        pattern=re.compile(r"\b(sk-ant-(?:api|admin)\d{0,2}-[A-Za-z0-9_-]{20,})\b"),
+        pattern=re.compile(r"\b(sk-ant-(?:api|admin|usr)\d{0,2}-[A-Za-z0-9_-]{20,})\b"),
         min_entropy=3.2,
         remediation=(
             "Revoke the Anthropic key in Anthropic Console and inject it via environment/secret "

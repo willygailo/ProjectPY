@@ -174,3 +174,52 @@ def test_mcp_server_exposes_new_tools_and_enforces_origin_guard(tmp_path: Path) 
 
     assert is_origin_allowed("http://127.0.0.1:3000", set()) is True
     assert is_origin_allowed("https://evil.example", set()) is False
+
+
+def test_anthropic_user_key_and_workspace_id_support(tmp_path: Path) -> None:
+    import httpx
+
+    from s1shell.ai.client import AnthropicClient
+    from s1shell.ai.service import AIService
+    from s1shell.config import classify_anthropic_key
+
+    assert classify_anthropic_key("sk-ant-admin01-xyz") == "admin"
+    assert classify_anthropic_key("sk-ant-api03-xyz") == "standard"
+    assert classify_anthropic_key("sk-ant-usr-xyz") == "user"
+
+    env_path = tmp_path / ".env"
+    cfg = RuntimeConfig.from_env(home_override=tmp_path / ".s1shell")
+    svc = AIService(cfg)
+    status = svc.save_env(
+        provider="anthropic",
+        api_key="sk-ant-usr-testkey1234567890",
+        model="claude-sonnet-5-5",
+        workspace_id="wrkspc_01TESTWORKSPACE",
+        env_file=env_path,
+    )
+    assert status.key_type == "user"
+    assert status.workspace_id == "wrkspc_01TESTWORKSPACE"
+    assert status.model == "claude-sonnet-5-5"
+
+    captured_headers: dict[str, str] = {}
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        captured_headers.update(dict(request.headers))
+        return httpx.Response(
+            200,
+            json={
+                "content": [{"type": "text", "text": "OK"}],
+                "usage": {"input_tokens": 5, "output_tokens": 2},
+            },
+        )
+
+    client = AnthropicClient(
+        cfg,
+        api_key="sk-ant-usr-testkey1234567890",
+        workspace_id="wrkspc_01TESTWORKSPACE",
+        transport=httpx.MockTransport(_handler),
+    )
+    text, inp, outp = client.complete(prompt="ping", model="claude-sonnet-5-5")
+    assert text == "OK"
+    assert inp == 5 and outp == 2
+    assert captured_headers.get("anthropic-workspace-id") == "wrkspc_01TESTWORKSPACE"

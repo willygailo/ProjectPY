@@ -85,12 +85,14 @@ def mask_api_key(key: str) -> str:
 
 
 def classify_anthropic_key(key: str | None) -> str:
-    """Classify an Anthropic API key as `unset`, `admin`, `standard`, or `custom`."""
+    """Classify an Anthropic API key as `unset`, `admin`, `user`, `standard`, or `custom`."""
     if not key or not key.strip():
         return "unset"
     stripped = key.strip()
     if stripped.startswith("sk-ant-admin"):
         return "admin"
+    if stripped.startswith("sk-ant-usr"):
+        return "user"
     if stripped.startswith("sk-ant-api") or stripped.startswith("sk-ant-"):
         return "standard"
     return "custom"
@@ -282,6 +284,10 @@ class RuntimeConfig:
     def get_anthropic_api_key(self) -> tuple[str | None, str]:
         """Resolve `ANTHROPIC_API_KEY` and return `(value, source)`."""
         return self.get_env_var("ANTHROPIC_API_KEY")
+
+    def get_anthropic_workspace_id(self) -> tuple[str | None, str]:
+        """Resolve optional `ANTHROPIC_WORKSPACE_ID` (for `sk-ant-usr*` user-scoped keys)."""
+        return self.get_env_var("ANTHROPIC_WORKSPACE_ID")
 
     def get_anthropic_model(self) -> str:
         """Resolve `ANTHROPIC_MODEL` or return the default Anthropic model."""

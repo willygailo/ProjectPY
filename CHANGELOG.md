@@ -14,6 +14,8 @@ All notable changes to S1shell will be documented in this file.
   - `s1shell analyze email`: Offline or live-DNS SPF (IPv4 CIDR blast radius & lookup budget), DMARC (policy/subdomain/pct/alignment/reporting), and cryptographic DKIM public-key DER bit-length auditor.
   - `s1shell analyze headers`: 100%-offline raw HTTP header (`curl -i`, Burp, DevTools, or `profile.json`) security posture, CSP3, stack fingerprint, EOL, and remediation auditor.
   - `s1shell analyze cvss`: Upgraded `cve/cvss.py` with full FIRST CVSS v3.0/v3.1 Base, Temporal, Environmental, and Exploitability/Impact sub-score calculations plus CVSS v4.0 vector validation/decoding.
+- **Anthropic User-Scoped Key (`sk-ant-usr*`) & Workspace Support (`config.py`, `ai/client.py`, `ai/service.py`, `doctor.py`)**:
+  - Added `ANTHROPIC_WORKSPACE_ID` (`s1shell ai env --workspace-id wrkspc_...`), automatic `anthropic-workspace-id` header forwarding in `AnthropicClient`, `user` key classification in `doctor` / `ai env`, and `sk-ant-usr*` leak detection in `scan secrets`.
 - **Expanded Remediation Playbooks, Offline EOL DB, MCP Tools & Automated Test Suite**:
   - Added `cloudflare` and `traefik` remediation stacks, fixed Caddy `HDR-HSTS-WEAK`/`HDR-CSP-UNSAFE` coverage, and added CORS/SRI/OIDC/JWKS/LEAK remediation snippets in `assess/remediate.py`.
   - Expanded offline `fingerprint/eol.yaml` with 14 additional production technologies (PostgreSQL, MySQL, Redis, Envoy, Traefik, Varnish, Django, Rails, Laravel, Next.js, OpenSSH, Grafana, Jenkins).

@@ -69,7 +69,13 @@ _PROVIDER_MODEL_VARS = {
 }
 
 
-def _build_env_note(provider: str, configured: bool, key_type: str) -> str:
+def _build_env_note(
+    provider: str,
+    configured: bool,
+    key_type: str,
+    *,
+    workspace_id: str | None = None,
+) -> str:
     if provider == "builtin":
         return (
             "Built-in offline tactical & defensive synthesizer active "
@@ -85,7 +91,13 @@ def _build_env_note(provider: str, configured: bool, key_type: str) -> str:
     if provider == "anthropic" and key_type == "admin":
         return (
             "Admin key (sk-ant-admin*) detected; /v1/messages inference requires a "
-            "standard sk-ant-api* key (auto-fallback to builtin tactical synthesizer active)."
+            "standard sk-ant-api* key or sk-ant-usr* key + ANTHROPIC_WORKSPACE_ID "
+            "(auto-fallback to builtin tactical synthesizer active)."
+        )
+    if provider == "anthropic" and key_type == "user" and not workspace_id:
+        return (
+            "User-scoped key (sk-ant-usr*) detected without ANTHROPIC_WORKSPACE_ID; "
+            "set `--workspace-id wrkspc_...` so requests include `anthropic-workspace-id`."
         )
     return f"{provider} API key configured and ready for defensive analysis."
 
@@ -182,6 +194,9 @@ class AIService:
         masked = mask_api_key(api_key) if api_key else None
         model = self._cfg.get_ai_model(active_prov)
         base_url = self._cfg.get_ai_base_url(active_prov)
+        workspace_id = (
+            self._cfg.get_anthropic_workspace_id()[0] if active_prov == "anthropic" else None
+        )
         env_file = (
             source
             if source not in ("environment", "unset", "builtin")
@@ -198,9 +213,10 @@ class AIService:
             source=source if active_prov not in {"ollama", "builtin"} else "local",
             model=model,
             env_file=env_file,
-            note=_build_env_note(active_prov, configured, key_type),
+            note=_build_env_note(active_prov, configured, key_type, workspace_id=workspace_id),
             provider=active_prov,
             base_url=base_url,
+            workspace_id=workspace_id,
         )
 
     def save_env(
@@ -210,13 +226,15 @@ class AIService:
         model: str | None = None,
         provider: str | None = None,
         base_url: str | None = None,
+        workspace_id: str | None = None,
         env_file: Path | None = None,
     ) -> AIEnvStatus:
-        """Persist AI provider, key, endpoint, and/or model atomically to a `0600` `.env` file."""
+        """Persist AI provider, key, workspace ID, endpoint, and/or model to `0600` `.env`."""
         clean_key = api_key.strip() if api_key is not None else None
         clean_model = model.strip() if model is not None else None
         clean_prov = provider.strip().lower() if provider is not None else None
         clean_url = base_url.strip() if base_url is not None else None
+        clean_ws = workspace_id.strip() if workspace_id is not None else None
 
         if api_key is not None and not clean_key:
             raise ValidationError("--set-key cannot be empty.")
@@ -228,9 +246,18 @@ class AIService:
             )
         if base_url is not None and not clean_url:
             raise ValidationError("--base-url cannot be empty.")
-        if clean_key is None and clean_model is None and clean_prov is None and clean_url is None:
+        if workspace_id is not None and not clean_ws:
+            raise ValidationError("--workspace-id cannot be empty.")
+        if (
+            clean_key is None
+            and clean_model is None
+            and clean_prov is None
+            and clean_url is None
+            and clean_ws is None
+        ):
             raise ValidationError(
-                "Provide --set-key, --model, --provider, and/or --base-url to update `.env`."
+                "Provide --set-key, --model, --provider, --workspace-id, and/or --base-url "
+                "to update `.env`."
             )
 
         target_path = (
@@ -253,6 +280,8 @@ class AIService:
             existing[_PROVIDER_KEY_VARS[active_prov]] = clean_key
         if clean_model is not None:
             existing[_PROVIDER_MODEL_VARS[active_prov]] = clean_model
+        if clean_ws is not None:
+            existing["ANTHROPIC_WORKSPACE_ID"] = clean_ws
 
         atomic_write_private(
             target_path,
@@ -275,6 +304,11 @@ class AIService:
             saved_url = existing.get(
                 "S1SHELL_AI_BASE_URL", ""
             ).strip() or self._cfg.get_ai_base_url(active_prov)
+            saved_ws = (
+                existing.get("ANTHROPIC_WORKSPACE_ID", "").strip() or None
+                if active_prov == "anthropic"
+                else None
+            )
             return AIEnvStatus(
                 configured=configured,
                 masked_key=mask_api_key(saved_key) if saved_key else None,
@@ -282,9 +316,10 @@ class AIService:
                 source=str(target_path),
                 model=saved_model,
                 env_file=str(target_path),
-                note=_build_env_note(active_prov, configured, key_type),
+                note=_build_env_note(active_prov, configured, key_type, workspace_id=saved_ws),
                 provider=active_prov,
                 base_url=saved_url,
+                workspace_id=saved_ws,
             )
         return self.env_status(provider=active_prov)
 
@@ -448,9 +483,7 @@ class AIService:
                 error=str(primary_exc),
             )
             auto_fb = (
-                "builtin"
-                if (self._transport is None and primary_provider != "builtin")
-                else None
+                "builtin" if (self._transport is None and primary_provider != "builtin") else None
             )
             effective_fb = (
                 fallback_provider.strip().lower()

@@ -36,7 +36,7 @@ _AI_SKILLS = (
     "detection-engineering retest-diff-brief token-crypto-auditor"
 )
 _AI_FLAGS = (
-    "--provider --base-url --set-key --model --env-file --input --prompt "
+    "--provider --base-url --set-key --model --workspace-id --env-file --input --prompt "
     "--mode --skill --pipeline --structured --redact --restore --raw-context "
     "--local-only --fallback --cache --refresh --goal --max-steps "
     f"--max-tokens {_COMMON_FLAGS}"

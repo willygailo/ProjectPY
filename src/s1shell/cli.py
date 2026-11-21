@@ -526,6 +526,11 @@ def build_parser() -> argparse.ArgumentParser:
     ai_env.add_argument("--set-key", default=None, help="Set API key for the active provider.")
     ai_env.add_argument("--model", default=None, help="Set model ID for the active provider.")
     ai_env.add_argument(
+        "--workspace-id",
+        default=None,
+        help="Optional Anthropic Workspace ID (`wrkspc_...`, for `sk-ant-usr*` user keys).",
+    )
+    ai_env.add_argument(
         "--env-file",
         type=Path,
         default=None,
@@ -1855,12 +1860,14 @@ def dispatch(
                 or args.model is not None
                 or args.provider is not None
                 or args.base_url is not None
+                or args.workspace_id is not None
             ):
                 env_res = ai_svc.save_env(
                     api_key=args.set_key,
                     model=args.model,
                     provider=args.provider,
                     base_url=args.base_url,
+                    workspace_id=args.workspace_id,
                     env_file=args.env_file,
                 )
             else:
