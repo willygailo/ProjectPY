@@ -527,21 +527,22 @@ Target Identity, Contacts (Email / Gmail / Phone) & Surface Entities: https://ww
 
 ### Phase 1 — Pre-Engagement Passive OSINT (Zero Target Contact)
 
-Gather passive infrastructure, certificate SANs, domain registration, and reputation telemetry before touching `https://www.target.com` (cached in `~/.s1shell/cache.db` with automatic retry/backoff on HTTP `429`/`502`/`503`/`504`):
+Gather passive infrastructure, certificate SANs, domain registration, and reputation telemetry before touching `https://www.target.com` (accepts full URLs, subdomains, apex domains, or IPs — automatically falling back from subdomains like `https://m.target.com` or `portal.acme.com.ph` to the registrable apex domain `target.com` / `acme.com.ph`; cached in `~/.s1shell/cache.db` with automatic retry/backoff on HTTP `429`/`502`/`503`/`504`):
 
 ```bash
-# 1. Enumerate Certificate Transparency SANs passively (zero API key) and export review candidates
-s1shell intel ct target.com --export-candidates ./target-candidates.txt
+# 1. Enumerate Certificate Transparency SANs passively (zero API key; accepts URL, subdomain, or apex domain)
+s1shell intel ct https://www.target.com --export-candidates ./target-candidates.txt
 
-# 2. Inspect domain registration, registrar lock, DNSSEC delegation, & expiry via RDAP (zero API key)
-s1shell intel rdap target.com
+# 2. Inspect domain/IP registration, registrar, emails, phones, & entities via RDAP (zero API key; auto-resolves subdomains to apex)
+s1shell intel rdap https://www.target.com
+s1shell intel rdap 93.184.216.34
 
 # 3. Query passive VirusTotal, urlscan.io Search, GreyNoise, & RDAP reputation
-s1shell intel lookup www.target.com --sources vt,urlscan,rdap
+s1shell intel lookup https://www.target.com --sources vt,urlscan,rdap
 s1shell intel lookup 93.184.216.34 --sources vt,greynoise,rdap
 
 # Optional Analyst OPSEC: append `--tor` to route any Phase 1 passive lookup via local Tor SOCKS5h
-# s1shell intel ct target.com --tor
+# s1shell intel ct https://www.target.com --tor
 ```
 
 ---
@@ -836,7 +837,7 @@ s1shell audit verify
 | `s1shell assess <target \| --targets-file>` | Scoped target + NVD/KEV/EPSS (+ optional VT/GN/urlscan/RDAP with `--intel`) | Unified profile, fingerprint, EOL, CVE, intel, posture, playbook, & report bundle |
 | `s1shell scope add \| import \| list \| check \| remove \| expire` | DNS on `check` only (DoH-over-Tor with `--tor --tor-targets`; zero DNS on `.onion`) | Manage authorized allow/exclude rules (domain, IP, CIDR, URL prefix, v3 `.onion`) & bulk imports |
 | `s1shell cve search \| get \| audit \| cache clear` | Public NVD / CVE.org / OSV.dev / GHSA / KEV / EPSS | CVE lookup, SSVC priority triage, & recursive lockfile/SBOM auditing |
-| `s1shell intel env \| lookup \| advisory \| ct \| rdap` | Public VT / GreyNoise / urlscan Search / GHSA / crt.sh / RDAP | Zero-target-contact passive threat intel, CT logs, RDAP (org, emails, phones, entities), & `.env` key manager |
+| `s1shell intel env \| lookup \| advisory \| ct \| rdap` | Public VT / GreyNoise / urlscan Search / GHSA / crt.sh / RDAP | Zero-target-contact passive threat intel, CT logs, RDAP (org, emails, phones, entities; auto subdomain-to-apex fallback), & `.env` key manager |
 | `s1shell codec decode \| encode \| inspect \| hash` | None (offline) | Offline Base64/Hex/URL/SAML/JWT/X.509/Gzip/Auto decoder, encoder, inspector, & hashes |
 | `s1shell profile <target>` | Single target (1 GET + TLS + opt-in checks) | Recursive SPF/DNS, TLS chain/Subject/Serial/SPKI, CSP v2, passive emails/Gmail, phones, keys/IDs, names/JSON-LD, social links, cloud buckets, API paths, OIDC/JWKS, `OPTIONS` |
 | `s1shell fingerprint [<target> \| --from-profile FILE]` | None (`--from-profile`) or 1 GET | Passive server/CDN/WAF/JS-library identification with CPE 2.3 & offline EOL flags |

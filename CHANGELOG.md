@@ -36,6 +36,7 @@ All notable changes to S1shell will be documented in this file.
   - Added a dedicated **`Target Identity, Contacts (Email / Gmail / Phone) & Surface Entities`** table to `s1shell profile` and `s1shell assess` (`table`, `md`, `json`, and `html` reports).
 
 ### Fixed
+- **Subdomain & URL-to-Apex Fallback on `intel rdap`, `intel ct`, & `intel lookup` (`intel/clients.py`)**: Added `_domain_lookup_candidates()` (with 2-label ccSLD awareness for `.com.ph`, `.gov.ph`, `.edu.ph`, `.org.ph`, `.net.ph`, `.co.uk`, etc.) so passing a full URL or subdomain (e.g. `s1shell intel rdap https://m.gsmarena.com` or `portal.acme.com.ph`) automatically falls back to the registrable apex domain (`gsmarena.com` / `acme.com.ph`) instead of failing with HTTP 404.
 - **HTTPS IP-Literal TLS Handshake (`profile/tls_check.py`)**: Fixed `ValueError: check_hostname requires server_hostname` when profiling HTTPS IP targets (e.g. `https://1.1.1.1` or `https://127.0.0.1`) by passing the IP literal as `server_hostname` during verified TLS handshakes so Python's `ssl` validates IP SANs cleanly.
 - **Scope Table Rendering (`output.py`)**: Prevented Rich 80-column table truncation on `s1shell scope list` when long v3 `.onion` or URL-prefix entries are present (`min_width=16, overflow="fold"`).
 

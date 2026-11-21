@@ -246,27 +246,39 @@ class VirusTotalClient:
         return self._api_key is not None
 
     def fetch(self, indicator: str, *, indicator_type: str) -> dict[str, Any]:
-        """Fetch raw VirusTotal v3 JSON for a domain or IP address."""
+        """Fetch raw VirusTotal v3 JSON for a domain or IP address (with apex fallback)."""
         if not self._api_key:
             raise NetworkError("VIRUSTOTAL_API_KEY is not configured.")
         endpoint = "ip_addresses" if indicator_type == "ip" else "domains"
-        url = f"{self._cfg.virustotal_api_url.rstrip('/')}/{endpoint}/{indicator}"
-        headers = {"x-apikey": self._api_key}
-        resp = _get_with_retry(
-            self._cfg,
-            url,
-            service_name="VirusTotal API",
-            headers=headers,
-            transport=self._transport,
-            sleeper=self._sleeper,
+        candidates = (
+            _domain_lookup_candidates(indicator)
+            if indicator_type == "domain"
+            else [indicator.strip()]
         )
-        if resp.status_code != 200:
-            raise NetworkError(f"VirusTotal API returned HTTP {resp.status_code}")
-        try:
-            data: dict[str, Any] = resp.json()
-        except ValueError as exc:
-            raise NetworkError(f"VirusTotal API returned invalid JSON: {exc}") from exc
-        return data
+        base = self._cfg.virustotal_api_url.rstrip("/")
+        headers = {"x-apikey": self._api_key}
+        last_status = 404
+        for idx, candidate in enumerate(candidates):
+            url = f"{base}/{endpoint}/{candidate}"
+            resp = _get_with_retry(
+                self._cfg,
+                url,
+                service_name="VirusTotal API",
+                headers=headers,
+                transport=self._transport,
+                sleeper=self._sleeper,
+            )
+            last_status = resp.status_code
+            if resp.status_code == 404 and idx < len(candidates) - 1:
+                continue
+            if resp.status_code != 200:
+                raise NetworkError(f"VirusTotal API returned HTTP {resp.status_code}")
+            try:
+                data: dict[str, Any] = resp.json()
+            except ValueError as exc:
+                raise NetworkError(f"VirusTotal API returned invalid JSON: {exc}") from exc
+            return data
+        raise NetworkError(f"VirusTotal API returned HTTP {last_status}")
 
 
 class GreyNoiseClient:
@@ -521,6 +533,8 @@ def parse_crtsh_payload(
         if cn and cn not in raw_names:
             raw_names.insert(0, cn)
 
+        apex_low = _domain_lookup_candidates(dom_low)[-1]
+        suffixes = (f".{dom_low}", f".{apex_low}")
         clean_sans: list[str] = []
         for candidate in raw_names:
             if not candidate or " " in candidate or "@" in candidate:
@@ -528,10 +542,10 @@ def parse_crtsh_payload(
             cleaned = candidate.rstrip(".")
             if cleaned.startswith("*."):
                 base = cleaned[2:]
-                if base == dom_low or base.endswith("." + dom_low):
+                if base in (dom_low, apex_low) or base.endswith(suffixes):
                     wildcards.add(cleaned)
                     clean_sans.append(cleaned)
-            elif cleaned == dom_low or cleaned.endswith("." + dom_low):
+            elif cleaned in (dom_low, apex_low) or cleaned.endswith(suffixes):
                 subdomains.add(cleaned)
                 clean_sans.append(cleaned)
 
@@ -711,6 +725,98 @@ def parse_rdap_payload(
     )
 
 
+_TWO_LABEL_PUBLIC_SUFFIXES = frozenset(
+    {
+        "com.ph",
+        "gov.ph",
+        "edu.ph",
+        "org.ph",
+        "net.ph",
+        "mil.ph",
+        "ngo.ph",
+        "co.uk",
+        "org.uk",
+        "gov.uk",
+        "ac.uk",
+        "com.au",
+        "net.au",
+        "org.au",
+        "edu.au",
+        "gov.au",
+        "co.jp",
+        "ne.jp",
+        "or.jp",
+        "ac.jp",
+        "go.jp",
+        "co.kr",
+        "or.kr",
+        "go.kr",
+        "com.sg",
+        "edu.sg",
+        "gov.sg",
+        "org.sg",
+        "com.my",
+        "gov.my",
+        "edu.my",
+        "org.my",
+        "co.id",
+        "or.id",
+        "go.id",
+        "ac.id",
+        "co.in",
+        "net.in",
+        "org.in",
+        "gov.in",
+        "ac.in",
+        "com.br",
+        "org.br",
+        "gov.br",
+        "com.mx",
+        "gob.mx",
+        "co.nz",
+        "org.nz",
+        "govt.nz",
+        "co.za",
+        "org.za",
+        "gov.za",
+        "com.tw",
+        "org.tw",
+        "gov.tw",
+        "edu.tw",
+        "com.hk",
+        "org.hk",
+        "gov.hk",
+        "edu.hk",
+        "com.cn",
+        "net.cn",
+        "org.cn",
+        "gov.cn",
+        "edu.cn",
+        "com.tr",
+        "gov.tr",
+        "edu.tr",
+    }
+)
+
+
+def _domain_lookup_candidates(domain: str) -> list[str]:
+    """Return `[domain, ..., registrable_apex]` so subdomain queries fall back to apex."""
+    cleaned = domain.strip().lower().rstrip(".")
+    labels = [lbl for lbl in cleaned.split(".") if lbl]
+    if len(labels) <= 2:
+        return [cleaned]
+    last_two = ".".join(labels[-2:])
+    min_labels = 3 if last_two in _TWO_LABEL_PUBLIC_SUFFIXES else 2
+    if len(labels) <= min_labels:
+        return [cleaned]
+    candidates: list[str] = []
+    for idx in range(0, len(labels) - min_labels + 1):
+        cand = ".".join(labels[idx:])
+        if cand not in candidates:
+            candidates.append(cand)
+    return candidates
+
+
 class CrtShClient:
     """Strictly passive Certificate Transparency log client via crt.sh (zero target contact)."""
 
@@ -726,31 +832,39 @@ class CrtShClient:
         self._sleeper = sleeper
 
     def fetch_domain(self, domain: str) -> list[dict[str, Any]]:
-        """Query `https://crt.sh/?q=%.<domain>&output=json` passively."""
-        cleaned = domain.strip().lower().rstrip(".")
-        params = {"q": f"%.{cleaned}", "output": "json"}
-        resp = _get_with_retry(
-            self._cfg,
-            self._cfg.crtsh_api_url,
-            service_name="crt.sh CT log",
-            params=params,
-            transport=self._transport,
-            sleeper=self._sleeper,
-        )
-        if resp.status_code == 404:
-            return []
-        if resp.status_code != 200:
-            raise NetworkError(f"crt.sh CT log returned HTTP {resp.status_code}")
-        text = resp.text.strip()
-        if not text:
-            return []
-        try:
-            data = resp.json()
-        except ValueError as exc:
-            raise NetworkError(f"crt.sh returned invalid JSON: {exc}") from exc
-        if not isinstance(data, list):
-            return []
-        return [item for item in data if isinstance(item, dict)]
+        """Query `https://crt.sh/?q=%.<domain>&output=json` passively (with apex fallback)."""
+        candidates = _domain_lookup_candidates(domain)
+        for idx, candidate in enumerate(candidates):
+            params = {"q": f"%.{candidate}", "output": "json"}
+            resp = _get_with_retry(
+                self._cfg,
+                self._cfg.crtsh_api_url,
+                service_name="crt.sh CT log",
+                params=params,
+                transport=self._transport,
+                sleeper=self._sleeper,
+            )
+            if resp.status_code == 404:
+                if idx < len(candidates) - 1:
+                    continue
+                return []
+            if resp.status_code != 200:
+                raise NetworkError(f"crt.sh CT log returned HTTP {resp.status_code}")
+            text = resp.text.strip()
+            if not text:
+                if idx < len(candidates) - 1:
+                    continue
+                return []
+            try:
+                data = resp.json()
+            except ValueError as exc:
+                raise NetworkError(f"crt.sh returned invalid JSON: {exc}") from exc
+            if not isinstance(data, list):
+                return []
+            items = [item for item in data if isinstance(item, dict)]
+            if items or idx == len(candidates) - 1:
+                return items
+        return []
 
 
 class RDAPClient:
@@ -770,20 +884,32 @@ class RDAPClient:
     def fetch(self, indicator: str, *, indicator_type: str) -> tuple[dict[str, Any], str]:
         """Fetch RDAP JSON for a domain or IP via RFC 7484 bootstrap (`follow_redirects=True`)."""
         endpoint = "ip" if indicator_type == "ip" else "domain"
-        url = f"{self._cfg.rdap_base_url.rstrip('/')}/{endpoint}/{indicator.strip()}"
-        resp = _get_with_retry(
-            self._cfg,
-            url,
-            service_name="RDAP",
-            headers={"Accept": "application/rdap+json, application/json"},
-            transport=self._transport,
-            follow_redirects=True,
-            sleeper=self._sleeper,
+        candidates = (
+            _domain_lookup_candidates(indicator)
+            if indicator_type == "domain"
+            else [indicator.strip()]
         )
-        if resp.status_code != 200:
-            raise NetworkError(f"RDAP server returned HTTP {resp.status_code}")
-        try:
-            data: dict[str, Any] = resp.json()
-        except ValueError as exc:
-            raise NetworkError(f"RDAP server returned invalid JSON: {exc}") from exc
-        return data, str(resp.url)
+        base = self._cfg.rdap_base_url.rstrip("/")
+        last_status = 404
+        for idx, candidate in enumerate(candidates):
+            url = f"{base}/{endpoint}/{candidate}"
+            resp = _get_with_retry(
+                self._cfg,
+                url,
+                service_name="RDAP",
+                headers={"Accept": "application/rdap+json, application/json"},
+                transport=self._transport,
+                follow_redirects=True,
+                sleeper=self._sleeper,
+            )
+            last_status = resp.status_code
+            if resp.status_code == 404 and idx < len(candidates) - 1:
+                continue
+            if resp.status_code != 200:
+                raise NetworkError(f"RDAP server returned HTTP {resp.status_code}")
+            try:
+                data: dict[str, Any] = resp.json()
+            except ValueError as exc:
+                raise NetworkError(f"RDAP server returned invalid JSON: {exc}") from exc
+            return data, str(resp.url)
+        raise NetworkError(f"RDAP server returned HTTP {last_status}")
