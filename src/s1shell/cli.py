@@ -12,6 +12,7 @@ from s1shell import DEV_CREDIT, __version__
 from s1shell.ai.client import SUPPORTED_AI_MODES
 from s1shell.ai.pipelines import SUPPORTED_AI_PIPELINES
 from s1shell.ai.service import AIService
+from s1shell.analyze.service import AnalyzeService
 from s1shell.assess.diff import diff_assessments
 from s1shell.assess.remediate import SUPPORTED_STACKS, generate_remediation_from_file
 from s1shell.assess.scorer import SUPPORTED_PRESETS, check_policy_gate
@@ -60,27 +61,35 @@ from s1shell.output import (
     render_codec_hash,
     render_codec_inspect,
     render_codec_transform,
+    render_config_scan,
+    render_csp_analysis,
     render_ct_lookup,
     render_cve_result,
+    render_cvss_analysis,
     render_dependency_audit,
     render_doctor_report,
+    render_email_analysis,
     render_fingerprint_result,
     render_ghsa_advisories,
+    render_header_analysis,
     render_intel_env,
     render_intel_lookup,
     render_mcp_ping,
     render_profile_result,
     render_rdap_lookup,
     render_remediation_plan,
+    render_sbom_result,
     render_scope_check,
     render_scope_entries,
     render_scope_import,
+    render_secret_scan,
     render_tor_check,
     render_tor_status,
     write_or_print,
 )
 from s1shell.profile.service import ProfileService
 from s1shell.report.service import ReportService
+from s1shell.scan.service import ScanService
 from s1shell.scope import ScopeManager, parse_expiry
 from s1shell.tor import probe_local_tor_port, validate_tor_proxy_url, verify_tor_egress
 
@@ -1096,6 +1105,179 @@ def build_parser() -> argparse.ArgumentParser:
         help="Comma-separated algorithms (default: md5,sha1,sha256,sha384,sha512,blake2b,crc32).",
     )
 
+    # --- scan ---
+    scan_p = modules.add_parser(
+        "scan",
+        parents=[common],
+        help="Offline local security scanner: secrets, IaC/config audit, & CycloneDX 1.5 SBOM.",
+    )
+    scan_cmds = scan_p.add_subparsers(dest="command", required=False)
+
+    sc_sec = scan_cmds.add_parser(
+        "secrets",
+        parents=[common],
+        help="Scan local files, repositories, or git diffs for exposed secrets (redacted).",
+    )
+    sc_sec.add_argument(
+        "path",
+        nargs="?",
+        type=Path,
+        default=Path("."),
+        help="File or repository directory to scan (default: current directory).",
+    )
+    sc_sec.add_argument(
+        "--no-gitignore",
+        action="store_true",
+        help="Do not skip files matching root `.gitignore`.",
+    )
+    sc_sec.add_argument(
+        "--git-staged",
+        action="store_true",
+        help="Scan only currently staged `git diff --cached` additions (ideal for pre-commit).",
+    )
+    sc_sec.add_argument(
+        "--git-diff",
+        default=None,
+        help="Scan only added lines in `git diff <REF>` (e.g. `HEAD~1` or `main...HEAD`).",
+    )
+    sc_sec.add_argument(
+        "--fail-on",
+        choices=["LOW", "MEDIUM", "HIGH", "CRITICAL"],
+        default=None,
+        help="Exit 4 if any secret finding meets or exceeds this severity.",
+    )
+
+    sc_cfg = scan_cmds.add_parser(
+        "config",
+        parents=[common],
+        help="Audit Dockerfiles, K8s manifests, GitHub Actions, Compose, NGINX, SSHd & .env.",
+    )
+    sc_cfg.add_argument(
+        "path",
+        nargs="?",
+        type=Path,
+        default=Path("."),
+        help="Config file or repository directory to audit (default: current directory).",
+    )
+    sc_cfg.add_argument(
+        "--fail-on",
+        choices=["LOW", "MEDIUM", "HIGH", "CRITICAL"],
+        default=None,
+        help="Exit 4 if any IaC/config finding meets or exceeds this severity.",
+    )
+
+    sc_sbom = scan_cmds.add_parser(
+        "sbom",
+        parents=[common],
+        help="Generate a CycloneDX 1.5 JSON SBOM from local lockfiles, manifests & Dockerfiles.",
+    )
+    sc_sbom.add_argument(
+        "path",
+        nargs="?",
+        type=Path,
+        default=Path("."),
+        help="Project directory or dependency manifest (default: current directory).",
+    )
+    sc_sbom.add_argument(
+        "--no-recursive",
+        action="store_true",
+        help="Only inspect top-level directory without recursing into subdirectories.",
+    )
+    sc_sbom.add_argument(
+        "--raw-bom",
+        action="store_true",
+        help="Emit raw CycloneDX 1.5 JSON directly (compatible with `s1shell cve audit`).",
+    )
+
+    # --- analyze ---
+    an_p = modules.add_parser(
+        "analyze",
+        parents=[common],
+        help=(
+            "Deep offline/passive security analyzers: CSP3, Email Auth (SPF/DMARC/DKIM), "
+            "Headers & CVSS."
+        ),
+    )
+    an_cmds = an_p.add_subparsers(dest="command", required=False)
+
+    an_csp = an_cmds.add_parser(
+        "csp",
+        parents=[common],
+        help="Evaluate a Content-Security-Policy for bypass gadgets, directives & hardening.",
+    )
+    an_csp.add_argument("policy", nargs="?", default=None, help="Raw CSP policy string.")
+    an_csp.add_argument(
+        "--file",
+        "--from-profile",
+        dest="file",
+        type=Path,
+        default=None,
+        help="Read CSP from a text file or saved S1shell `profile.json` / `assess.json`.",
+    )
+
+    an_email = an_cmds.add_parser(
+        "email",
+        parents=[common],
+        help="Audit SPF, DMARC, DKIM key strength, MTA-STS, & TLS-RPT anti-spoofing defenses.",
+    )
+    an_email.add_argument("domain", help="Domain name to audit (e.g. example.com).")
+    an_email.add_argument("--spf", default=None, help="Analyze an explicit SPF TXT record offline.")
+    an_email.add_argument(
+        "--dmarc", default=None, help="Analyze an explicit DMARC TXT record offline."
+    )
+    an_email.add_argument(
+        "--dkim", default=None, help="Analyze an explicit DKIM TXT record offline."
+    )
+    an_email.add_argument(
+        "--selector",
+        default=None,
+        help="DKIM selector name (e.g. `google`, `selector1`, `default`) for DNS or labeling.",
+    )
+    an_email.add_argument(
+        "--offline",
+        action="store_true",
+        help="Disable live DNS lookups (evaluate supplied `--spf`/`--dmarc`/`--dkim` only).",
+    )
+
+    an_hdr = an_cmds.add_parser(
+        "headers",
+        parents=[common],
+        help="Audit raw HTTP response headers (curl -i / Burp / profile.json) completely offline.",
+    )
+    an_hdr.add_argument(
+        "input",
+        nargs="?",
+        default=None,
+        help="Inline header block, `-` for stdin, or omit when using `--file`.",
+    )
+    an_hdr.add_argument(
+        "--file",
+        type=Path,
+        default=None,
+        help="Read raw HTTP headers or saved `profile.json`/`assess.json` from FILE.",
+    )
+    an_hdr.add_argument(
+        "--url",
+        default="https://offline.local/",
+        help="Logical target URL context for HTTPS/HSTS scoring (default: https://offline.local/).",
+    )
+    an_hdr.add_argument(
+        "--preset",
+        choices=SUPPORTED_PRESETS,
+        default="web",
+        help="Posture preset: web (default), api, or strict.",
+    )
+
+    an_cvss = an_cmds.add_parser(
+        "cvss",
+        parents=[common],
+        help="Calculate and decode FIRST CVSS v3.0/v3.1 (Base/Temporal/Env) & v4.0 vectors.",
+    )
+    an_cvss.add_argument(
+        "vector",
+        help="CVSS vector string (e.g. `CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H`).",
+    )
+
     # --- mcp ---
     mcp_p = modules.add_parser(
         "mcp",
@@ -1357,6 +1539,8 @@ def dispatch(
         "ai",
         "intel",
         "codec",
+        "scan",
+        "analyze",
         "mcp",
         "tor",
     }
@@ -2046,6 +2230,97 @@ def dispatch(
             algos = [a.strip() for a in args.algos.split(",") if a.strip()] if args.algos else None
             h_res = c_svc.hash_data(data, source=src_label, algos=algos)
             render_codec_hash(h_res, fmt=fmt, console=console, out_file=out_file, stdout=stdout)
+            return int(ExitCode.SUCCESS)
+
+    if args.module == "scan":
+        fmt = str(_opt(args, "fmt", "table"))
+        s_svc = ScanService(cfg, audit_logger=audit_log)
+        if args.command == "secrets":
+            sec_res = s_svc.secrets(
+                args.path,
+                respect_gitignore=not bool(args.no_gitignore),
+                git_staged=bool(args.git_staged),
+                git_diff=args.git_diff,
+            )
+            render_secret_scan(sec_res, fmt=fmt, console=console, out_file=out_file, stdout=stdout)
+            if (
+                args.fail_on
+                and sec_res.highest_severity
+                and _SEV_RANK.get(sec_res.highest_severity, 99)
+                <= _SEV_RANK.get(args.fail_on.upper(), 99)
+            ):
+                raise PolicyGateError(
+                    f"Secret scan CI gate failed: {len(sec_res.findings)} finding(s), "
+                    f"highest severity {sec_res.highest_severity} >= {args.fail_on.upper()}."
+                )
+            return int(ExitCode.SUCCESS)
+        if args.command == "config":
+            cfg_res = s_svc.config(args.path)
+            render_config_scan(cfg_res, fmt=fmt, console=console, out_file=out_file, stdout=stdout)
+            if (
+                args.fail_on
+                and cfg_res.highest_severity
+                and _SEV_RANK.get(cfg_res.highest_severity, 99)
+                <= _SEV_RANK.get(args.fail_on.upper(), 99)
+            ):
+                raise PolicyGateError(
+                    f"Config scan CI gate failed: {len(cfg_res.findings)} finding(s), "
+                    f"highest severity {cfg_res.highest_severity} >= {args.fail_on.upper()}."
+                )
+            return int(ExitCode.SUCCESS)
+        if args.command == "sbom":
+            sbom_res = s_svc.sbom(args.path, recursive=not bool(args.no_recursive))
+            render_sbom_result(
+                sbom_res,
+                fmt=fmt,
+                raw_bom=bool(args.raw_bom),
+                console=console,
+                out_file=out_file,
+                stdout=stdout,
+            )
+            return int(ExitCode.SUCCESS)
+
+    if args.module == "analyze":
+        fmt = str(_opt(args, "fmt", "table"))
+        an_svc = AnalyzeService(cfg)
+        if args.command == "csp":
+            csp_res = an_svc.csp(policy=args.policy, file_path=args.file)
+            render_csp_analysis(csp_res, fmt=fmt, console=console, out_file=out_file, stdout=stdout)
+            return int(ExitCode.SUCCESS)
+        if args.command == "email":
+            em_res = an_svc.email(
+                args.domain,
+                spf_record=args.spf,
+                dmarc_record=args.dmarc,
+                dkim_record=args.dkim,
+                dkim_selector=args.selector,
+                offline=bool(args.offline),
+            )
+            render_email_analysis(
+                em_res, fmt=fmt, console=console, out_file=out_file, stdout=stdout
+            )
+            return int(ExitCode.SUCCESS)
+        if args.command == "headers":
+            raw_hdr_text: str | None = args.input
+            if args.file is None and (args.input == "-" or args.input is None):
+                in_stream = stdin if stdin is not None else sys.stdin
+                if stdin is not None or not in_stream.isatty():
+                    raw_hdr_text = in_stream.read()
+            hdr_res = an_svc.headers(
+                raw_text=raw_hdr_text,
+                file_path=args.file,
+                url=args.url,
+                preset=args.preset,
+            )
+            render_header_analysis(
+                hdr_res, fmt=fmt, console=console, out_file=out_file, stdout=stdout
+            )
+            return int(ExitCode.SUCCESS)
+        if args.command == "cvss":
+            cvss_res = an_svc.cvss(args.vector)
+            render_cvss_analysis(
+                cvss_res, fmt=fmt, console=console, out_file=out_file, stdout=stdout
+            )
             return int(ExitCode.SUCCESS)
 
     if args.module == "mcp":

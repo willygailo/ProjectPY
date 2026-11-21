@@ -10,7 +10,16 @@ from urllib.parse import urlsplit
 from s1shell.assess.models import AssessmentFinding, RemediationPlan, RemediationSnippet
 from s1shell.errors import ValidationError
 
-SUPPORTED_STACKS = ("auto", "nginx", "apache", "caddy", "express", "generic")
+SUPPORTED_STACKS = (
+    "auto",
+    "nginx",
+    "apache",
+    "caddy",
+    "express",
+    "cloudflare",
+    "traefik",
+    "generic",
+)
 
 _HSTS_VAL = "max-age=31536000; includeSubDomains"
 _CSP_STRICT = "default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
@@ -32,6 +41,10 @@ def _detect_stacks(fingerprint_matches: list[dict[str, Any]]) -> list[str]:
             stacks.append("caddy")
         elif ("express" in prod or "next.js" in prod) and "express" not in stacks:
             stacks.append("express")
+        elif "cloudflare" in prod and "cloudflare" not in stacks:
+            stacks.append("cloudflare")
+        elif "traefik" in prod and "traefik" not in stacks:
+            stacks.append("traefik")
     return stacks
 
 
@@ -183,17 +196,23 @@ def _build_caddy_snippets(fids: set[str]) -> list[RemediationSnippet]:
     hdr_ids: list[str] = []
     mapping = [
         ("HDR-HSTS", f'Strict-Transport-Security "{_HSTS_VAL}"'),
+        ("HDR-HSTS-WEAK", f'Strict-Transport-Security "{_HSTS_VAL}"'),
         ("HDR-CSP", f'Content-Security-Policy "{_CSP_STRICT}"'),
+        ("HDR-CSP-UNSAFE", f'Content-Security-Policy "{_CSP_STRICT}"'),
         ("HDR-XFO", 'X-Frame-Options "DENY"'),
         ("HDR-XCTO", 'X-Content-Type-Options "nosniff"'),
         ("HDR-REF", 'Referrer-Policy "strict-origin-when-cross-origin"'),
         ("HDR-PERM", f'Permissions-Policy "{_PERM_VAL}"'),
+        ("HDR-COOP", 'Cross-Origin-Opener-Policy "same-origin"'),
+        ("HDR-CORP", 'Cross-Origin-Resource-Policy "same-origin"'),
         ("HDR-CACHE", 'Cache-Control "no-store, private"'),
     ]
     for fid, line in mapping:
         if fid in fids:
             hdr_ids.append(fid)
-            hdr_lines.append(f"    {line}")
+            formatted = f"    {line}"
+            if formatted not in hdr_lines:
+                hdr_lines.append(formatted)
     disc_ids = sorted(fid for fid in fids if fid.startswith("DISC-"))
     if disc_ids:
         hdr_ids.extend(disc_ids)
@@ -207,6 +226,66 @@ def _build_caddy_snippets(fids: set[str]) -> list[RemediationSnippet]:
             finding_ids=sorted(set(hdr_ids)),
             language="caddy",
             config="header {\n" + "\n".join(hdr_lines) + "\n}",
+        )
+    ]
+
+
+def _build_cloudflare_snippets(fids: set[str]) -> list[RemediationSnippet]:
+    hdr_ids = sorted(fid for fid in fids if fid.startswith(("HDR-", "DISC-")))
+    if not hdr_ids:
+        return []
+    return [
+        RemediationSnippet(
+            title="Cloudflare Worker / Transform Rule Security Headers",
+            stack="cloudflare",
+            finding_ids=hdr_ids,
+            language="javascript",
+            config=(
+                "export default {\n"
+                "  async fetch(request) {\n"
+                "    const resp = await fetch(request);\n"
+                "    const headers = new Headers(resp.headers);\n"
+                f'    headers.set("Strict-Transport-Security", "{_HSTS_VAL}");\n'
+                f'    headers.set("Content-Security-Policy", "{_CSP_STRICT}");\n'
+                '    headers.set("X-Frame-Options", "DENY");\n'
+                '    headers.set("X-Content-Type-Options", "nosniff");\n'
+                '    headers.set("Referrer-Policy", "strict-origin-when-cross-origin");\n'
+                f'    headers.set("Permissions-Policy", "{_PERM_VAL}");\n'
+                '    headers.delete("X-Powered-By");\n'
+                "    return new Response(resp.body, { status: resp.status, headers });\n"
+                "  },\n"
+                "};"
+            ),
+        )
+    ]
+
+
+def _build_traefik_snippets(fids: set[str]) -> list[RemediationSnippet]:
+    hdr_ids = sorted(fid for fid in fids if fid.startswith(("HDR-", "DISC-")))
+    if not hdr_ids:
+        return []
+    return [
+        RemediationSnippet(
+            title="Traefik Security Headers Middleware (YAML)",
+            stack="traefik",
+            finding_ids=hdr_ids,
+            language="yaml",
+            config=(
+                "http:\n"
+                "  middlewares:\n"
+                "    sec-headers:\n"
+                "      headers:\n"
+                "        stsSeconds: 31536000\n"
+                "        stsIncludeSubdomains: true\n"
+                "        frameDeny: true\n"
+                "        contentTypeNosniff: true\n"
+                '        referrerPolicy: "strict-origin-when-cross-origin"\n'
+                f'        contentSecurityPolicy: "{_CSP_STRICT}"\n'
+                f'        permissionsPolicy: "{_PERM_VAL}"\n'
+                "        customResponseHeaders:\n"
+                '          Server: ""\n'
+                '          X-Powered-By: ""'
+            ),
         )
     ]
 
@@ -321,6 +400,79 @@ def _build_dns_and_meta_snippets(fids: set[str], host: str) -> list[RemediationS
     return snippets
 
 
+def _build_appsec_snippets(fids: set[str], host: str) -> list[RemediationSnippet]:
+    """Generate cross-stack defensive guidance for CORS, SRI, OIDC/JWKS, and exposure leaks."""
+    snippets: list[RemediationSnippet] = []
+
+    cors_ids = sorted(fid for fid in fids if fid.startswith("CORS-"))
+    if cors_ids:
+        snippets.append(
+            RemediationSnippet(
+                title="Strict CORS Origin Allowlist & Cache Isolation",
+                stack="generic",
+                finding_ids=cors_ids,
+                language="http",
+                config=(
+                    f"Access-Control-Allow-Origin: https://{host}\n"
+                    "Vary: Origin\n"
+                    "# Never reflect arbitrary Origin headers or pair `*` / `null` with "
+                    "Access-Control-Allow-Credentials: true."
+                ),
+            )
+        )
+
+    if "HTML-002" in fids:
+        snippets.append(
+            RemediationSnippet(
+                title="Subresource Integrity (SRI) Pinning for External Scripts",
+                stack="generic",
+                finding_ids=["HTML-002"],
+                language="html",
+                config=(
+                    '<script src="https://cdn.example.com/lib.min.js"\n'
+                    '        integrity="sha384-<BASE64_SHA384_HASH>"\n'
+                    '        crossorigin="anonymous"></script>'
+                ),
+            )
+        )
+
+    oidc_ids = sorted(fid for fid in fids if fid.startswith(("OIDC-", "JWKS-")))
+    if oidc_ids:
+        snippets.append(
+            RemediationSnippet(
+                title="OIDC & JWKS Hardening Checklist",
+                stack="generic",
+                finding_ids=oidc_ids,
+                language="text",
+                config=(
+                    "1. Enforce HTTPS on issuer, authorization, token, and jwks_uri endpoints.\n"
+                    "2. Disable legacy implicit flow (`token`) and unsigned `alg: none`.\n"
+                    '3. Require PKCE `S256` (`code_challenge_methods_supported: ["S256"]`).\n'
+                    "4. Publish ONLY public JWK parameters (kty, use, kid, alg, n, e / "
+                    "crv, x, y); immediately rotate any key with exposed private params (d, p, q)."
+                ),
+            )
+        )
+
+    leak_ids = sorted(fid for fid in fids if fid.startswith("LEAK-"))
+    if leak_ids:
+        snippets.append(
+            RemediationSnippet(
+                title="Production Exposure & Secret Leak Remediation",
+                stack="generic",
+                finding_ids=leak_ids,
+                language="text",
+                config=(
+                    "1. Rotate any exposed credential/API key/token immediately.\n"
+                    "2. Disable production debug/stack-trace pages (DEBUG=False, custom 500).\n"
+                    "3. Strip `//# sourceMappingURL=` and remove `.map` files from web roots."
+                ),
+            )
+        )
+
+    return snippets
+
+
 def generate_remediation_plan(
     *,
     target_url: str,
@@ -351,11 +503,16 @@ def generate_remediation_plan(
         snippets = _build_caddy_snippets(fids)
     elif selected == "express":
         snippets = _build_express_snippets(fids)
+    elif selected == "cloudflare":
+        snippets = _build_cloudflare_snippets(fids)
+    elif selected == "traefik":
+        snippets = _build_traefik_snippets(fids)
     else:
         snippets = _build_generic_snippets(fids)
 
     host = (urlsplit(target_url).hostname or "example.com").strip()
     snippets.extend(_build_dns_and_meta_snippets(fids, host))
+    snippets.extend(_build_appsec_snippets(fids, host))
 
     return RemediationPlan(
         target=target_url,

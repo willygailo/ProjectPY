@@ -5,8 +5,8 @@ from __future__ import annotations
 from s1shell.errors import ValidationError
 
 _MODULES = (
-    "scope cve intel codec profile fingerprint report audit doctor completion ai assess diff "
-    "remediate mcp tor help check"
+    "scope cve intel codec scan analyze profile fingerprint report audit doctor completion ai "
+    "assess diff remediate mcp tor help check"
 )
 _COMMON_FLAGS = (
     "--format --out --verbose --no-color --authorized --scope-file --home "
@@ -31,7 +31,7 @@ _PROFILE_FLAGS = f"--tls-versions --dns-security --well-known --check-methods {_
 _REPORT_FLAGS = f"--input --profile --fingerprint --cve --operator {_COMMON_FLAGS}"
 _AUDIT_FLAGS = f"--limit --category --outcome --command --target {_COMMON_FLAGS}"
 _AI_SKILLS = (
-    "attack-path-modeling pentest-report-writer threat-intel-correlator "
+    "attack-path-modeling ptes-ops-chain pentest-report-writer threat-intel-correlator "
     "sbom-supply-chain zero-trust-hardening compliance-mapper "
     "detection-engineering retest-diff-brief token-crypto-auditor"
 )
@@ -52,6 +52,14 @@ _INTEL_FLAGS = (
     "--set-nvd-key --set-github-key --set-vt-key --set-greynoise-key --set-urlscan-key "
     "--env-file --pinned-ip --sources --cve --ecosystem --package --limit "
     f"--export-candidates --refresh --offline {_COMMON_FLAGS}"
+)
+_STACKS = "auto nginx apache caddy express cloudflare traefik generic"
+_SCAN_FLAGS = (
+    f"--git-staged --git-diff --no-gitignore --fail-on --no-recursive --raw-bom {_COMMON_FLAGS}"
+)
+_ANALYZE_FLAGS = (
+    "--file --from-profile --spf --dmarc --dkim --selector --offline --url --preset "
+    f"{_COMMON_FLAGS}"
 )
 _REMEDIATE_FLAGS = f"--stack {_COMMON_FLAGS}"
 _CODEC_FLAGS = (
@@ -84,7 +92,7 @@ _s1shell_completions() {{
             return 0
             ;;
         --stack)
-            COMPREPLY=( $(compgen -W "auto nginx apache caddy express generic" -- "${{cur}}") )
+            COMPREPLY=( $(compgen -W "{_STACKS}" -- "${{cur}}") )
             return 0
             ;;
         --provider|--ai-provider)
@@ -191,6 +199,20 @@ _s1shell_completions() {{
                 COMPREPLY=( $(compgen -W "{_CODEC_FLAGS}" -- "${{cur}}") )
             fi
             ;;
+        scan)
+            if [[ ${{COMP_CWORD}} -eq 2 ]]; then
+                COMPREPLY=( $(compgen -W "secrets config sbom" -- "${{cur}}") )
+            else
+                COMPREPLY=( $(compgen -W "{_SCAN_FLAGS}" -- "${{cur}}") )
+            fi
+            ;;
+        analyze)
+            if [[ ${{COMP_CWORD}} -eq 2 ]]; then
+                COMPREPLY=( $(compgen -W "csp email headers cvss" -- "${{cur}}") )
+            else
+                COMPREPLY=( $(compgen -W "{_ANALYZE_FLAGS}" -- "${{cur}}") )
+            fi
+            ;;
         mcp)
             if [[ ${{COMP_CWORD}} -eq 2 ]]; then
                 COMPREPLY=( $(compgen -W "serve config ping" -- "${{cur}}") )
@@ -232,6 +254,8 @@ _s1shell() {
         'cve:Research CVEs via NVD, CVE.org, OSV.dev, CISA KEV, and FIRST EPSS'
         'intel:Passive threat intel (VirusTotal, GreyNoise, urlscan.io, GitHub GHSA)'
         'codec:Offline decoder, encoder, smart token/cert/hash inspector, and checksums'
+        'scan:Offline secret scanner, IaC/config auditor, and CycloneDX 1.5 SBOM generator'
+        'analyze:Deep CSP3, Email Auth (SPF/DMARC/DKIM), offline HTTP headers, and CVSS analyzer'
         'profile:Read-only DNS/TLS/HTTP/HTML profiling'
         'fingerprint:Passive software, CDN, WAF, and JS library identification'
         'report:Compile CVE, profile, fingerprint, and assess reports'
@@ -355,6 +379,25 @@ _s1shell() {
                     )
                     _describe 'codec command' subcmds
                     ;;
+                scan)
+                    local -a subcmds
+                    subcmds=(
+                        'secrets:Scan local files, repos, or git diffs for exposed secrets'
+                        'config:Audit Dockerfiles, K8s, GitHub Actions, Compose, NGINX, SSHd & .env'
+                        'sbom:Generate CycloneDX 1.5 JSON SBOM from lockfiles & manifests'
+                    )
+                    _describe 'scan command' subcmds
+                    ;;
+                analyze)
+                    local -a subcmds
+                    subcmds=(
+                        'csp:Evaluate CSP3 directives, bypass hosts & hardened policy'
+                        'email:Audit SPF blast radius, DMARC policy & DKIM key strength'
+                        'headers:Audit raw HTTP response headers offline'
+                        'cvss:Decode and compute FIRST CVSS v3.0/v3.1/v4.0 vectors'
+                    )
+                    _describe 'analyze command' subcmds
+                    ;;
             esac
             ;;
     esac
@@ -369,6 +412,8 @@ complete -c s1shell -n "__fish_use_subcommand" -a "scope" -d "Manage authorized 
 complete -c s1shell -n "__fish_use_subcommand" -a "cve" -d "CVE & SBOM intelligence (NVD/OSV)"
 complete -c s1shell -n "__fish_use_subcommand" -a "intel" -d "Passive VT/GreyNoise/urlscan/GHSA"
 complete -c s1shell -n "__fish_use_subcommand" -a "codec" -d "Offline decode/encode/inspect/hash"
+complete -c s1shell -n "__fish_use_subcommand" -a "scan" -d "Offline secrets, IaC & SBOM"
+complete -c s1shell -n "__fish_use_subcommand" -a "analyze" -d "CSP3, Email, Headers & CVSS"
 complete -c s1shell -n "__fish_use_subcommand" -a "profile" -d "Read-only target profiling"
 complete -c s1shell -n "__fish_use_subcommand" -a "fingerprint" -d "Passive stack matching"
 complete -c s1shell -n "__fish_use_subcommand" -a "report" -d "Compile assessment reports"
@@ -398,10 +443,12 @@ complete -c s1shell -n "__fish_seen_subcommand_from mcp" -a "serve config ping"
 complete -c s1shell -n "__fish_seen_subcommand_from tor" -a "status check"
 complete -c s1shell -n "__fish_seen_subcommand_from intel" -a "env lookup advisory ct rdap"
 complete -c s1shell -n "__fish_seen_subcommand_from codec" -a "decode encode inspect hash"
+complete -c s1shell -n "__fish_seen_subcommand_from scan" -a "secrets config sbom"
+complete -c s1shell -n "__fish_seen_subcommand_from analyze" -a "csp email headers cvss"
 
 complete -c s1shell -l format -x -a "table json md html sarif"
 complete -c s1shell -l preset -x -a "web api strict"
-complete -c s1shell -l stack -x -a "auto nginx apache caddy express generic"
+complete -c s1shell -l stack -x -a "auto nginx apache caddy express cloudflare traefik generic"
 complete -c s1shell -l out -r
 complete -c s1shell -l scope-file -r
 complete -c s1shell -l home -r

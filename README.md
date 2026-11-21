@@ -14,7 +14,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-10b981?style=for-the-badge)](LICENSE)
 [![Tests](https://img.shields.io/badge/Tests-Passing-22c55e?style=for-the-badge)](.github/workflows/ci.yml)
 [![MCP](https://img.shields.io/badge/MCP_Server-Online_HTTP_%2B_Stdio-8b5cf6?style=for-the-badge)](#online-and-local-mcp-server-s1shell-mcp-serve)
-[![AI Skills](https://img.shields.io/badge/Defensive_AI-9_Skills_%2B_ReAct-06b6d4?style=for-the-badge)](#defensive-ai-skills)
+[![AI Skills](https://img.shields.io/badge/Defensive_AI-10_Skills_%2B_ReAct-06b6d4?style=for-the-badge)](#defensive-ai-skills)
 [![Tor](https://img.shields.io/badge/Tor-Zero--Leak_SOCKS5h-7c3aed?style=for-the-badge)](#defensive-tor-routing)
 
 <br />
@@ -37,15 +37,15 @@
 
 ```mermaid
 flowchart LR
-    CLI["s1shell CLI\n(16 Modules · --tor / --tor-targets)"] --> GATE["Policy Gate\nScope -> Auth -> IP Pin / Tor SOCKS5h -> SHA-256 Audit"]
+    CLI["s1shell CLI\n(18 Modules · --tor / --tor-targets)"] --> GATE["Policy Gate\nScope -> Auth -> IP Pin / Tor SOCKS5h -> SHA-256 Audit"]
     CLI --> INTEL["Zero-Target-Contact Intel\n7 Feeds · SQLite Cache · Optional --tor"]
-    CLI --> AI["Defensive AI Engine\n9 Skills · Pipelines · ReAct · Grounding · Redact"]
-    CLI --> OFFLINE["Offline Tools & Online MCP\nCodec · Remediate · Diff · HTTP/Stdio MCP"]
+    CLI --> AI["Defensive AI Engine\n10 Skills · Pipelines · ReAct (14 Tools) · Builtin"]
+    CLI --> OFFLINE["Offline Tools & Online MCP\nScan · Analyze · Codec · Remediate · Diff · MCP"]
 
     GATE --> TARGET["profile · fingerprint · assess\nClearnet + Authorized v3 .onion"]
     INTEL --> FEEDS["NVD · CVE.org · OSV.dev · KEV · EPSS\nVT · GreyNoise · urlscan · GHSA · crt.sh · RDAP"]
-    AI --> MODELS["Local Ollama (--local-only)\nAnthropic · OpenAI-Compat · Gemini"]
-    OFFLINE --> OUT["HTML · MD · JSON · SARIF 2.1.0\n23–26 MCP Tools · Resources · Prompts"]
+    AI --> MODELS["Builtin Offline · Local Ollama (--local-only)\nAnthropic · OpenAI-Compat · Gemini"]
+    OFFLINE --> OUT["HTML · MD · JSON · SARIF 2.1.0 · CycloneDX 1.5\n30–33 MCP Tools · Resources · Prompts"]
 
     style CLI fill:#0f172a,stroke:#38bdf8,color:#f8fafc
     style GATE fill:#0f172a,stroke:#f59e0b,color:#f8fafc

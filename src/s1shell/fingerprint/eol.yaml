@@ -82,3 +82,68 @@ products:
     min_supported: "2.8.0"
     note: "HAProxy branches older than 2.8 LTS have reached End-of-Life."
     recommended: "Upgrade to HAProxy 2.8 LTS or 3.0 LTS."
+
+  - product: "Envoy"
+    min_supported: "1.30.0"
+    note: "Envoy releases older than 1.30.x are outside the 1-year upstream security support window."
+    recommended: "Upgrade to Envoy 1.31.x or newer."
+
+  - product: "Traefik"
+    min_supported: "2.11.0"
+    note: "Traefik 1.x and 2.x releases prior to 2.11 have reached End-of-Life."
+    recommended: "Upgrade to Traefik 3.x (or maintained 2.11.x)."
+
+  - product: "Varnish"
+    min_supported: "7.4.0"
+    note: "Varnish 6.x non-LTS and older 7.x releases no longer receive upstream security updates."
+    recommended: "Upgrade to Varnish 7.5+ or supported 6.0 LTS."
+
+  - product: "Django"
+    min_supported: "4.2.0"
+    note: "Django versions prior to 4.2 LTS have reached End-of-Life."
+    recommended: "Upgrade to Django 4.2 LTS or 5.1+."
+
+  - product: "Ruby on Rails"
+    min_supported: "7.1.0"
+    note: "Rails versions older than 7.1 have reached End-of-Life for security patches."
+    recommended: "Upgrade to Ruby on Rails 7.2 or 8.0."
+
+  - product: "Laravel"
+    min_supported: "11.0.0"
+    note: "Laravel versions older than 11.x have reached End-of-Life for security fixes."
+    recommended: "Upgrade to Laravel 11.x or 12.x."
+
+  - product: "Next.js"
+    min_supported: "14.2.0"
+    note: "Legacy Next.js releases prior to 14.2 are outside active security maintenance."
+    recommended: "Upgrade to Next.js 15.x (or latest 14.2.x patch)."
+
+  - product: "PostgreSQL"
+    min_supported: "13.0"
+    note: "PostgreSQL major versions older than 13 have reached End-of-Life."
+    recommended: "Upgrade to PostgreSQL 16 or 17."
+
+  - product: "MySQL"
+    min_supported: "8.0.0"
+    note: "MySQL 5.7 and earlier reached End-of-Life in October 2023."
+    recommended: "Upgrade to MySQL 8.0 LTS or 8.4 LTS."
+
+  - product: "Redis"
+    min_supported: "7.2.0"
+    note: "Redis branches older than 7.2 are outside active security support."
+    recommended: "Upgrade to Redis 7.4+ or Valkey 8.x."
+
+  - product: "OpenSSH"
+    min_supported: "9.3"
+    note: "Older OpenSSH releases lack recent security hardening and may be vulnerable to regreSSHion."
+    recommended: "Upgrade to OpenSSH 9.8+ (or distributor backported build)."
+
+  - product: "Grafana"
+    min_supported: "10.4.0"
+    note: "Grafana versions older than 10.4 have reached End-of-Life."
+    recommended: "Upgrade to Grafana 11.x."
+
+  - product: "Jenkins"
+    min_supported: "2.440.0"
+    note: "Legacy Jenkins LTS lines receive no security backports."
+    recommended: "Upgrade to the latest Jenkins LTS release."

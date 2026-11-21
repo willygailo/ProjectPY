@@ -18,6 +18,7 @@ import httpx
 
 from s1shell import __version__
 from s1shell.ai.service import AIService
+from s1shell.analyze.service import AnalyzeService
 from s1shell.assess.diff import diff_assessments
 from s1shell.assess.remediate import generate_remediation_from_file
 from s1shell.assess.service import AssessService
@@ -33,6 +34,7 @@ from s1shell.fingerprint.service import FingerprintService
 from s1shell.intel.service import IntelService
 from s1shell.models import dumps_json
 from s1shell.profile.service import ProfileService
+from s1shell.scan.service import ScanService
 from s1shell.scope import ScopeManager
 from s1shell.tor import probe_local_tor_port
 
@@ -172,7 +174,7 @@ BASE_TOOLS_SPEC: list[dict[str, Any]] = [
         "name": "s1shell_remediate",
         "description": (
             "Generate deterministic offline defensive hardening configuration snippets "
-            "(nginx/apache/caddy/express/generic + DNS + security.txt) from a saved assess.json."
+            "(nginx/apache/caddy/express/cloudflare/traefik/generic + DNS + security.txt)."
         ),
         "inputSchema": {
             "type": "object",
@@ -180,7 +182,16 @@ BASE_TOOLS_SPEC: list[dict[str, Any]] = [
                 "assess_path": {"type": "string"},
                 "stack": {
                     "type": "string",
-                    "enum": ["auto", "nginx", "apache", "caddy", "express", "generic"],
+                    "enum": [
+                        "auto",
+                        "nginx",
+                        "apache",
+                        "caddy",
+                        "express",
+                        "cloudflare",
+                        "traefik",
+                        "generic",
+                    ],
                     "default": "auto",
                 },
             },
@@ -430,6 +441,120 @@ BASE_TOOLS_SPEC: list[dict[str, Any]] = [
                     ),
                 }
             },
+        },
+    },
+    {
+        "name": "s1shell_scan_secrets",
+        "description": (
+            "Scan a local file, repository, or git diff offline for exposed secrets and "
+            "credentials (strictly redacted output, entropy + placeholder filtering)."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "Local file or directory path."},
+                "respect_gitignore": {"type": "boolean", "default": True},
+                "git_staged": {"type": "boolean", "default": False},
+                "git_diff": {"type": "string", "description": "Optional git ref (e.g. HEAD~1)."},
+            },
+            "required": ["path"],
+        },
+    },
+    {
+        "name": "s1shell_scan_config",
+        "description": (
+            "Audit local Dockerfiles, Kubernetes manifests, GitHub Actions workflows, "
+            "Docker Compose, NGINX, SSHd, and .env files offline for security misconfigurations."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "Local config file or directory path."}
+            },
+            "required": ["path"],
+        },
+    },
+    {
+        "name": "s1shell_scan_sbom",
+        "description": (
+            "Generate a CycloneDX 1.5 JSON SBOM offline from local lockfiles, pyproject.toml, "
+            "package.json, and Dockerfile base images."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "Local project directory or manifest."},
+                "recursive": {"type": "boolean", "default": True},
+            },
+            "required": ["path"],
+        },
+    },
+    {
+        "name": "s1shell_analyze_csp",
+        "description": (
+            "Statically evaluate a Content-Security-Policy (or saved profile.json) offline for "
+            "script-gadget/JSONP bypass hosts, unsafe directives, duplicates, and hardened rewrite."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "policy": {"type": "string", "description": "Raw CSP string."},
+                "file_path": {"type": "string", "description": "Path to profile.json or CSP file."},
+            },
+        },
+    },
+    {
+        "name": "s1shell_analyze_email",
+        "description": (
+            "Audit SPF blast radius & lookup budget, DMARC policy/alignment, and DKIM RSA/Ed25519 "
+            "key strength offline (explicit records) or via passive DNS."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "domain": {"type": "string"},
+                "spf_record": {"type": "string"},
+                "dmarc_record": {"type": "string"},
+                "dkim_record": {"type": "string"},
+                "dkim_selector": {"type": "string"},
+                "offline": {"type": "boolean", "default": True},
+            },
+            "required": ["domain"],
+        },
+    },
+    {
+        "name": "s1shell_analyze_headers",
+        "description": (
+            "Audit pasted raw HTTP response headers (curl -i / Burp / DevTools) offline for "
+            "security headers, CSP3, cookies, CORS, passive stack fingerprints, and remediations."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "raw_headers": {"type": "string", "description": "Raw HTTP response header block."},
+                "url": {"type": "string", "default": "https://offline.local/"},
+                "preset": {"type": "string", "enum": ["web", "api", "strict"], "default": "web"},
+            },
+            "required": ["raw_headers"],
+        },
+    },
+    {
+        "name": "s1shell_analyze_cvss",
+        "description": (
+            "Validate, decode, and calculate FIRST CVSS v3.0/v3.1 (Base/Temporal/Environmental) "
+            "and CVSS v4.0 metric vectors offline."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "vector": {
+                    "type": "string",
+                    "description": (
+                        "CVSS vector (e.g. CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H)."
+                    ),
+                }
+            },
+            "required": ["vector"],
         },
     },
 ]
@@ -799,6 +924,8 @@ class S1ShellMCPServer:
             )
         )
         self.codec_service = CodecService()
+        self.scan_service = ScanService(cfg, audit_logger=self.audit_logger)
+        self.analyze_service = AnalyzeService(cfg)
 
     @property
     def active_tools_spec(self) -> list[dict[str, Any]]:
@@ -1056,6 +1183,50 @@ class S1ShellMCPServer:
         if name == "s1shell_tor_status":
             p_url = str(arguments.get("proxy_url") or self.cfg.tor_proxy)
             return dumps_json(probe_local_tor_port(p_url))
+        if name == "s1shell_scan_secrets":
+            sec_res = self.scan_service.secrets(
+                Path(str(arguments.get("path", ""))),
+                respect_gitignore=bool(arguments.get("respect_gitignore", True)),
+                git_staged=bool(arguments.get("git_staged", False)),
+                git_diff=arguments.get("git_diff"),
+            )
+            return dumps_json(sec_res)
+        if name == "s1shell_scan_config":
+            cfg_res = self.scan_service.config(Path(str(arguments.get("path", ""))))
+            return dumps_json(cfg_res)
+        if name == "s1shell_scan_sbom":
+            sbom_res = self.scan_service.sbom(
+                Path(str(arguments.get("path", ""))),
+                recursive=bool(arguments.get("recursive", True)),
+            )
+            return dumps_json(sbom_res)
+        if name == "s1shell_analyze_csp":
+            fp_arg = arguments.get("file_path")
+            csp_res = self.analyze_service.csp(
+                policy=arguments.get("policy"),
+                file_path=Path(str(fp_arg)) if fp_arg else None,
+            )
+            return dumps_json(csp_res)
+        if name == "s1shell_analyze_email":
+            em_res = self.analyze_service.email(
+                str(arguments.get("domain", "")),
+                spf_record=arguments.get("spf_record"),
+                dmarc_record=arguments.get("dmarc_record"),
+                dkim_record=arguments.get("dkim_record"),
+                dkim_selector=arguments.get("dkim_selector"),
+                offline=bool(arguments.get("offline", True)),
+            )
+            return dumps_json(em_res)
+        if name == "s1shell_analyze_headers":
+            hdr_res = self.analyze_service.headers(
+                raw_text=str(arguments.get("raw_headers", "")),
+                url=str(arguments.get("url") or "https://offline.local/"),
+                preset=str(arguments.get("preset") or "web"),
+            )
+            return dumps_json(hdr_res)
+        if name == "s1shell_analyze_cvss":
+            cvss_res = self.analyze_service.cvss(str(arguments.get("vector", "")))
+            return dumps_json(cvss_res)
 
         # Opt-in fail-closed guarded scoped target tools
         if name in {"s1shell_profile", "s1shell_fingerprint", "s1shell_assess"}:

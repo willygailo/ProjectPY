@@ -2,6 +2,23 @@
 
 All notable changes to S1shell will be documented in this file.
 
+## [Unreleased]
+
+### Added — Offline Local Security Scanner (`s1shell scan`), Deep Policy/Crypto Analyzers (`s1shell analyze`) & Expanded Hardening
+- **Local Secret, IaC/Config & SBOM Scanner (`s1shell scan`, `src/s1shell/scan/`)**:
+  - `s1shell scan secrets [path] [--git-staged | --git-diff REF] [--fail-on SEV] [--format sarif]`: 27+ redacted credential detectors (AWS, GCP, Azure, GitHub, GitLab, Anthropic, OpenAI, Hugging Face, Stripe, Slack, Discord, Telegram, SendGrid, Mailgun, Twilio, npm, PyPI, Docker Hub, Vault, Shopify, PEM keys, DB URIs, JWTs, high-entropy generic assignments) with `.gitignore`/binary filtering, placeholder rejection, inline `# s1shell:ignore` suppression tracking, and line/column-accurate SARIF 2.1.0 output.
+  - `s1shell scan config [path] [--fail-on SEV] [--format sarif]`: Deterministic IaC & service security auditor for Dockerfiles, Kubernetes manifests, GitHub Actions workflows (incl. `pull_request_target` Pwn Request & expression injection), Docker Compose, NGINX, `.env`, and `sshd_config`.
+  - `s1shell scan sbom [path] [--raw-bom]`: Generates spec-compliant **CycloneDX 1.5 JSON SBOMs** from lockfiles, `pyproject.toml`, `package.json`, and Dockerfile base images, directly consumable by `s1shell cve audit`.
+- **Deep Security Policy, Email Auth, Offline Header & CVSS Analyzers (`s1shell analyze`, `src/s1shell/analyze/`)**:
+  - `s1shell analyze csp`: CSP3 static evaluator with 28-domain JSONP/script-gadget bypass DB, duplicate/typo directive detection, nonce entropy checks, grading, and hardened CSP rewrites.
+  - `s1shell analyze email`: Offline or live-DNS SPF (IPv4 CIDR blast radius & lookup budget), DMARC (policy/subdomain/pct/alignment/reporting), and cryptographic DKIM public-key DER bit-length auditor.
+  - `s1shell analyze headers`: 100%-offline raw HTTP header (`curl -i`, Burp, DevTools, or `profile.json`) security posture, CSP3, stack fingerprint, EOL, and remediation auditor.
+  - `s1shell analyze cvss`: Upgraded `cve/cvss.py` with full FIRST CVSS v3.0/v3.1 Base, Temporal, Environmental, and Exploitability/Impact sub-score calculations plus CVSS v4.0 vector validation/decoding.
+- **Expanded Remediation Playbooks, Offline EOL DB, MCP Tools & Automated Test Suite**:
+  - Added `cloudflare` and `traefik` remediation stacks, fixed Caddy `HDR-HSTS-WEAK`/`HDR-CSP-UNSAFE` coverage, and added CORS/SRI/OIDC/JWKS/LEAK remediation snippets in `assess/remediate.py`.
+  - Expanded offline `fingerprint/eol.yaml` with 14 additional production technologies (PostgreSQL, MySQL, Redis, Envoy, Traefik, Varnish, Django, Rails, Laravel, Next.js, OpenSSH, Grafana, Jenkins).
+  - Exposed 7 new read-only MCP tools (`30` default / `33` opt-in scoped tools) and 5 new ReAct investigator tools (`14` total), updated `help_guide.py` and shell completions, and added an offline `pytest` test suite in `tests/`.
+
 ## [0.5.0] - 2026-11-20
 
 ### Added — Advanced Defensive AI Tactics, Skills Library, Pipelines & Read-Only Investigator (`s1shell ai`)

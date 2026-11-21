@@ -11,6 +11,12 @@ from rich.table import Table
 
 from s1shell.ai.models import AIAnalysisResult, AIEnvStatus, AIInvestigationResult
 from s1shell.ai.skills import AISkill, AISkillsCatalog
+from s1shell.analyze.models import (
+    CSPAnalysisResult,
+    CVSSAnalysisResult,
+    EmailAuthAnalysisResult,
+    HeaderOfflineResult,
+)
 from s1shell.assess.models import (
     AssessmentDiffResult,
     AssessmentResult,
@@ -34,8 +40,13 @@ from s1shell.intel.models import (
 )
 from s1shell.models import dumps_json
 from s1shell.profile.models import ProfileResult
-from s1shell.report.sarif import render_dependency_sarif
+from s1shell.report.sarif import (
+    render_config_scan_sarif,
+    render_dependency_sarif,
+    render_secret_scan_sarif,
+)
 from s1shell.report.service import ReportService
+from s1shell.scan.models import ConfigScanResult, SBOMGenerateResult, SecretScanResult
 from s1shell.scope import ScopeCheckResult, ScopeEntry, ScopeImportResult
 from s1shell.tor import TorCheckResult, TorStatusResult
 
@@ -2377,3 +2388,495 @@ def render_tor_check(
     tbl.add_row("Latency", f"{result.latency_ms} ms")
     tbl.add_row("Detail", result.detail)
     _emit_tables([tbl], console=console, out_file=out_file, stdout=stdout)
+
+
+def render_secret_scan(
+    result: SecretScanResult,
+    *,
+    fmt: str,
+    console: Console,
+    out_file: Path | None = None,
+    stdout: TextIO | None = None,
+) -> None:
+    """Render `s1shell scan secrets` findings in `table`, `json`, `md`, or `sarif`."""
+    norm = _require_format(fmt, ("table", "json", "md", "sarif"), command="scan secrets")
+    if norm == "json":
+        write_or_print(dumps_json(result), out_file=out_file, stdout=stdout)
+        return
+    if norm == "sarif":
+        write_or_print(render_secret_scan_sarif(result), out_file=out_file, stdout=stdout)
+        return
+    if norm == "md":
+        lines = [
+            f"# S1shell Secret Scan: `{result.target_path}` ({result.scan_mode})",
+            "",
+            (
+                f"- **Files Scanned:** {result.files_scanned} | **Skipped:** "
+                f"{result.files_skipped} "
+                f"| **Suppressed:** {result.suppressed_count} | **Findings:** "
+                f"{len(result.findings)}"
+            ),
+            "",
+            "| Rule | Severity | Location | Redacted Match | Entropy | Title | Remediation |",
+            "|---|---|---|---|---|---|---|",
+        ]
+        for f in result.findings:
+            lines.append(
+                f"| `{f.rule_id}` | **{f.severity}** | "
+                f"`{_md_cell(f.file_path)}:{f.line}:{f.column}` | "
+                f"`{_md_cell(f.match_redacted)}` | {f.entropy:.2f} | {_md_cell(f.title)} | "
+                f"{_md_cell(f.remediation)} |"
+            )
+        write_or_print("\n".join(lines), out_file=out_file, stdout=stdout)
+        return
+
+    tbl = Table(
+        title=(
+            f"Secret Scan: {result.target_path} ({result.scan_mode}, "
+            f"{result.files_scanned} files, {len(result.findings)} findings)"
+        )
+    )
+    tbl.add_column("Rule", style="cyan", no_wrap=True)
+    tbl.add_column("Sev", no_wrap=True)
+    tbl.add_column("Location", overflow="fold")
+    tbl.add_column("Redacted Match", no_wrap=True)
+    tbl.add_column("Entropy", justify="right", no_wrap=True)
+    tbl.add_column("Title")
+    for f in result.findings:
+        tbl.add_row(
+            f.rule_id,
+            f.severity,
+            f"{f.file_path}:{f.line}:{f.column}",
+            f.match_redacted,
+            f"{f.entropy:.2f}",
+            f.title,
+        )
+    _emit_tables([tbl], console=console, out_file=out_file, stdout=stdout)
+
+
+def render_config_scan(
+    result: ConfigScanResult,
+    *,
+    fmt: str,
+    console: Console,
+    out_file: Path | None = None,
+    stdout: TextIO | None = None,
+) -> None:
+    """Render `s1shell scan config` IaC findings in `table`, `json`, `md`, or `sarif`."""
+    norm = _require_format(fmt, ("table", "json", "md", "sarif"), command="scan config")
+    if norm == "json":
+        write_or_print(dumps_json(result), out_file=out_file, stdout=stdout)
+        return
+    if norm == "sarif":
+        write_or_print(render_config_scan_sarif(result), out_file=out_file, stdout=stdout)
+        return
+    if norm == "md":
+        types_str = ", ".join(f"{k}={v}" for k, v in sorted(result.file_types.items())) or "none"
+        lines = [
+            f"# S1shell IaC & Config Audit: `{result.target_path}`",
+            "",
+            (
+                f"- **Files Audited:** {result.files_scanned} ({types_str}) | "
+                f"**Suppressed:** {result.suppressed_count} | **Findings:** {len(result.findings)}"
+            ),
+            "",
+            "| Rule | Severity | Type | Location | Title | Evidence | Remediation |",
+            "|---|---|---|---|---|---|---|",
+        ]
+        for f in result.findings:
+            lines.append(
+                f"| `{f.rule_id}` | **{f.severity}** | `{f.category}` | "
+                f"`{_md_cell(f.file_path)}:{f.line}` | {_md_cell(f.title)} | "
+                f"{_md_cell(f.evidence)} | {_md_cell(f.remediation)} |"
+            )
+        write_or_print("\n".join(lines), out_file=out_file, stdout=stdout)
+        return
+
+    tbl = Table(
+        title=(
+            f"IaC & Config Audit: {result.target_path} "
+            f"({result.files_scanned} files, {len(result.findings)} findings)"
+        )
+    )
+    tbl.add_column("Rule", style="cyan", no_wrap=True)
+    tbl.add_column("Sev", no_wrap=True)
+    tbl.add_column("Type", no_wrap=True)
+    tbl.add_column("Location", overflow="fold")
+    tbl.add_column("Title")
+    tbl.add_column("Remediation")
+    for f in result.findings:
+        tbl.add_row(
+            f.rule_id,
+            f.severity,
+            f.category,
+            f"{f.file_path}:{f.line}",
+            f.title,
+            f.remediation,
+        )
+    _emit_tables([tbl], console=console, out_file=out_file, stdout=stdout)
+
+
+def render_sbom_result(
+    result: SBOMGenerateResult,
+    *,
+    fmt: str,
+    raw_bom: bool = False,
+    console: Console,
+    out_file: Path | None = None,
+    stdout: TextIO | None = None,
+) -> None:
+    """Render `s1shell scan sbom` CycloneDX 1.5 SBOM summary or raw CycloneDX JSON."""
+    if raw_bom:
+        write_or_print(dumps_json(result.bom), out_file=out_file, stdout=stdout)
+        return
+    norm = _require_format(fmt, ("table", "json", "md"), command="scan sbom")
+    if norm == "json":
+        write_or_print(dumps_json(result.bom), out_file=out_file, stdout=stdout)
+        return
+    if norm == "md":
+        eco_str = ", ".join(f"{k}: {v}" for k, v in sorted(result.ecosystems.items())) or "none"
+        lines = [
+            f"# CycloneDX {result.spec_version} SBOM: `{result.target_path}`",
+            "",
+            f"- **Serial:** `{result.serial_number}` | **Components:** {result.component_count}",
+            f"- **Ecosystems:** {eco_str}",
+            f"- **Sources:** {', '.join(result.files_scanned) or 'none'}",
+            "",
+            "| Component | Version | Type | PURL |",
+            "|---|---|---|---|",
+        ]
+        for comp in result.bom.get("components", []):
+            lines.append(
+                f"| `{_md_cell(str(comp.get('name')))}` | `{_md_cell(str(comp.get('version')))}` | "
+                f"{comp.get('type')} | `{_md_cell(str(comp.get('purl')))}` |"
+            )
+        write_or_print("\n".join(lines), out_file=out_file, stdout=stdout)
+        return
+
+    summary = Table(
+        title=f"CycloneDX {result.spec_version} SBOM ({result.component_count} components)"
+    )
+    summary.add_column("Field", style="cyan", no_wrap=True)
+    summary.add_column("Value")
+    summary.add_row("Target", result.target_path)
+    summary.add_row("Serial Number", result.serial_number)
+    summary.add_row(
+        "Ecosystems",
+        ", ".join(f"{k}={v}" for k, v in sorted(result.ecosystems.items())) or "none",
+    )
+    summary.add_row("Files Scanned", ", ".join(result.files_scanned[:10]) or "none")
+
+    comp_tbl = Table(title="Components (first 40)")
+    comp_tbl.add_column("Name", style="cyan")
+    comp_tbl.add_column("Version")
+    comp_tbl.add_column("Type", no_wrap=True)
+    comp_tbl.add_column("Package URL (PURL)", overflow="fold")
+    for comp in result.bom.get("components", [])[:40]:
+        comp_tbl.add_row(
+            str(comp.get("name") or ""),
+            str(comp.get("version") or ""),
+            str(comp.get("type") or ""),
+            str(comp.get("purl") or ""),
+        )
+    _emit_tables([summary, comp_tbl], console=console, out_file=out_file, stdout=stdout)
+
+
+def render_csp_analysis(
+    result: CSPAnalysisResult,
+    *,
+    fmt: str,
+    console: Console,
+    out_file: Path | None = None,
+    stdout: TextIO | None = None,
+) -> None:
+    """Render `s1shell analyze csp` CSP3 audit report in `table`, `json`, or `md`."""
+    norm = _require_format(fmt, ("table", "json", "md"), command="analyze csp")
+    if norm == "json":
+        write_or_print(dumps_json(result), out_file=out_file, stdout=stdout)
+        return
+    if norm == "md":
+        lines = [
+            f"# CSP3 Security Analysis ({result.score}/100, Grade {result.grade})",
+            "",
+            f"- **Source:** `{result.source}` | **Directives:** {len(result.directives)}",
+            f"- **Known Bypass Hosts:** {', '.join(result.bypass_hosts) or 'none'}",
+            "",
+            "| ID | Severity | Directive | Finding | Remediation |",
+            "|---|---|---|---|---|",
+        ]
+        for f in result.findings:
+            lines.append(
+                f"| `{f.id}` | **{f.severity}** | `{f.directive}` | {_md_cell(f.title)} | "
+                f"{_md_cell(f.remediation)} |"
+            )
+        lines.extend(
+            [
+                "",
+                "## Recommended Hardened CSP",
+                "",
+                "```http",
+                f"Content-Security-Policy: {result.recommended_policy}",
+                "```",
+            ]
+        )
+        write_or_print("\n".join(lines), out_file=out_file, stdout=stdout)
+        return
+
+    meta = Table(title=f"CSP3 Audit — Score {result.score}/100 (Grade {result.grade})")
+    meta.add_column("Metric", style="cyan", no_wrap=True)
+    meta.add_column("Value")
+    meta.add_row("Source", result.source)
+    meta.add_row("Directives Parsed", str(len(result.directives)))
+    meta.add_row("Bypass/Gadget Hosts", ", ".join(result.bypass_hosts) or "none")
+    meta.add_row(
+        "Duplicates / Unknown",
+        f"{len(result.duplicate_directives)} / {len(result.unknown_directives)}",
+    )
+    meta.add_row("Recommended CSP", result.recommended_policy)
+
+    ftbl = Table(title=f"CSP Findings ({len(result.findings)})")
+    ftbl.add_column("ID", style="cyan", no_wrap=True)
+    ftbl.add_column("Sev", no_wrap=True)
+    ftbl.add_column("Directive", no_wrap=True)
+    ftbl.add_column("Finding")
+    ftbl.add_column("Remediation")
+    for f in result.findings:
+        ftbl.add_row(f.id, f.severity, f.directive, f.title, f.remediation)
+    _emit_tables([meta, ftbl], console=console, out_file=out_file, stdout=stdout)
+
+
+def render_email_analysis(
+    result: EmailAuthAnalysisResult,
+    *,
+    fmt: str,
+    console: Console,
+    out_file: Path | None = None,
+    stdout: TextIO | None = None,
+) -> None:
+    """Render `s1shell analyze email` SPF/DMARC/DKIM spoofing defense report."""
+    norm = _require_format(fmt, ("table", "json", "md"), command="analyze email")
+    if norm == "json":
+        write_or_print(dumps_json(result), out_file=out_file, stdout=stdout)
+        return
+    if norm == "md":
+        lines = [
+            f"# Email Spoofing Defense Audit: `{result.domain}` ({result.score}/100, Grade "
+            f"{result.grade})",
+            "",
+            f"- **Mode:** `{result.mode}` | **Spoofing Risk:** **{result.spoofing_risk}**",
+            (
+                f"- **SPF:** `{result.spf_all_qualifier or 'missing'}` "
+                f"(lookups={result.spf_lookup_count}/10, void={result.spf_void_lookups}, "
+                f"IPv4 blast={result.spf_ipv4_blast_radius:,})"
+            ),
+            f"- **DMARC Policy:** `{result.dmarc_tags.get('p', 'missing')}` "
+            f"(sp=`{result.dmarc_tags.get('sp', 'inherited')}`, "
+            f"pct=`{result.dmarc_tags.get('pct', '100')}`)",
+            f"- **DKIM:** `{result.dkim_key_type or '—'}` ({result.dkim_key_bits or '—'} bits)",
+            "",
+            "| ID | Severity | Protocol | Finding | Remediation |",
+            "|---|---|---|---|---|",
+        ]
+        for f in result.findings:
+            lines.append(
+                f"| `{f.id}` | **{f.severity}** | `{f.protocol}` | {_md_cell(f.title)} | "
+                f"{_md_cell(f.remediation)} |"
+            )
+        lines.extend(
+            [
+                "",
+                "## Recommended Hardened DNS Records",
+                "",
+                "```dns",
+                *result.recommended_records,
+                "```",
+            ]
+        )
+        write_or_print("\n".join(lines), out_file=out_file, stdout=stdout)
+        return
+
+    meta = Table(
+        title=(
+            f"Email Auth Audit: {result.domain} — {result.score}/100 "
+            f"(Grade {result.grade}, Risk {result.spoofing_risk})"
+        )
+    )
+    meta.add_column("Control", style="cyan", no_wrap=True)
+    meta.add_column("Observed State")
+    meta.add_row("Mode", result.mode)
+    meta.add_row(
+        "SPF",
+        f"{result.spf_all_qualifier or 'MISSING'} | lookups={result.spf_lookup_count}/10 | "
+        f"void={result.spf_void_lookups} | ip4_blast={result.spf_ipv4_blast_radius:,}",
+    )
+    meta.add_row(
+        "DMARC",
+        f"p={result.dmarc_tags.get('p', 'MISSING')} | "
+        f"sp={result.dmarc_tags.get('sp', 'inherited')} | "
+        f"pct={result.dmarc_tags.get('pct', '100')} | "
+        f"rua={'yes' if result.dmarc_tags.get('rua') else 'no'}",
+    )
+    if result.dkim_record or result.dkim_selector:
+        meta.add_row(
+            "DKIM",
+            f"selector={result.dkim_selector or 'inline'} | key={result.dkim_key_type or '—'} "
+            f"({result.dkim_key_bits if result.dkim_key_bits is not None else '—'} bits)",
+        )
+
+    ftbl = Table(title=f"Email Authentication Findings ({len(result.findings)})")
+    ftbl.add_column("ID", style="cyan", no_wrap=True)
+    ftbl.add_column("Sev", no_wrap=True)
+    ftbl.add_column("Proto", no_wrap=True)
+    ftbl.add_column("Title")
+    ftbl.add_column("Remediation")
+    for f in result.findings:
+        ftbl.add_row(f.id, f.severity, f.protocol, f.title, f.remediation)
+    _emit_tables([meta, ftbl], console=console, out_file=out_file, stdout=stdout)
+
+
+def render_header_analysis(
+    result: HeaderOfflineResult,
+    *,
+    fmt: str,
+    console: Console,
+    out_file: Path | None = None,
+    stdout: TextIO | None = None,
+) -> None:
+    """Render `s1shell analyze headers` offline HTTP header & stack audit."""
+    norm = _require_format(fmt, ("table", "json", "md"), command="analyze headers")
+    if norm == "json":
+        write_or_print(dumps_json(result), out_file=out_file, stdout=stdout)
+        return
+    if norm == "md":
+        fps = (
+            ", ".join(
+                f"{m.get('product')} {m.get('version') or ''}".strip() for m in result.fingerprints
+            )
+            or "none"
+        )
+        lines = [
+            f"# Offline HTTP Header Audit ({result.score}/100, Grade {result.grade})",
+            "",
+            f"- **Source:** `{result.source}` | **URL:** `{result.url}` | **Preset:** "
+            f"`{result.preset}`",
+            f"- **Headers Parsed:** {result.header_count} | **Fingerprints:** {fps}",
+            "",
+            "| ID | Severity | Category | Title | Remediation |",
+            "|---|---|---|---|---|",
+        ]
+        for f in result.findings:
+            lines.append(
+                f"| `{f.get('id')}` | **{f.get('severity')}** | `{f.get('category')}` | "
+                f"{_md_cell(str(f.get('title')))} | {_md_cell(str(f.get('remediation')))} |"
+            )
+        write_or_print("\n".join(lines), out_file=out_file, stdout=stdout)
+        return
+
+    meta = Table(
+        title=(
+            f"Offline HTTP Header Audit — {result.score}/100 (Grade {result.grade}, "
+            f"{result.risk_level})"
+        )
+    )
+    meta.add_column("Metric", style="cyan", no_wrap=True)
+    meta.add_column("Value")
+    meta.add_row("Source", result.source)
+    meta.add_row("Headers Parsed", str(result.header_count))
+    meta.add_row(
+        "Fingerprints",
+        ", ".join(
+            f"{m.get('product')} {m.get('version') or ''}".strip() for m in result.fingerprints
+        )
+        or "none",
+    )
+    if result.csp_analysis is not None:
+        meta.add_row(
+            "Deep CSP3 Grade",
+            f"{result.csp_analysis.score}/100 (Grade {result.csp_analysis.grade})",
+        )
+
+    ftbl = Table(title=f"Header & Stack Findings ({len(result.findings)})")
+    ftbl.add_column("ID", style="cyan", no_wrap=True)
+    ftbl.add_column("Sev", no_wrap=True)
+    ftbl.add_column("Category", no_wrap=True)
+    ftbl.add_column("Title")
+    ftbl.add_column("Remediation")
+    for f in result.findings:
+        ftbl.add_row(
+            str(f.get("id") or ""),
+            str(f.get("severity") or ""),
+            str(f.get("category") or ""),
+            str(f.get("title") or ""),
+            str(f.get("remediation") or ""),
+        )
+    _emit_tables([meta, ftbl], console=console, out_file=out_file, stdout=stdout)
+
+
+def render_cvss_analysis(
+    result: CVSSAnalysisResult,
+    *,
+    fmt: str,
+    console: Console,
+    out_file: Path | None = None,
+    stdout: TextIO | None = None,
+) -> None:
+    """Render `s1shell analyze cvss` FIRST CVSS v3.x/v4.0 breakdown."""
+    norm = _require_format(fmt, ("table", "json", "md"), command="analyze cvss")
+    if norm == "json":
+        write_or_print(dumps_json(result), out_file=out_file, stdout=stdout)
+        return
+    if norm == "md":
+        lines = [
+            f"# CVSS v{result.version} Vector Analysis",
+            "",
+            f"- **Vector:** `{result.vector}`",
+            f"- **Base Score:** `{result.base_score if result.base_score is not None else '—'}` "
+            f"({result.base_severity or '—'})",
+        ]
+        if result.temporal_score is not None:
+            lines.append(
+                f"- **Temporal Score:** `{result.temporal_score}` ({result.temporal_severity})"
+            )
+        if result.environmental_score is not None:
+            lines.append(
+                f"- **Environmental Score:** `{result.environmental_score}` "
+                f"({result.environmental_severity})"
+            )
+        lines.extend(["", "| Group | Metric | Code | Value |", "|---|---|---|---|"])
+        for m in result.metrics:
+            lines.append(f"| {m.group} | {m.name} (`{m.metric}`) | `{m.code}` | {m.value_label} |")
+        if result.notes:
+            lines.extend(["", "## Notes", *(f"- {n}" for n in result.notes)])
+        write_or_print("\n".join(lines), out_file=out_file, stdout=stdout)
+        return
+
+    summary = Table(title=f"CVSS v{result.version} Score Breakdown")
+    summary.add_column("Score", style="cyan", no_wrap=True)
+    summary.add_column("Value")
+    summary.add_row("Vector", result.vector)
+    summary.add_row(
+        "Base Score",
+        f"{result.base_score} ({result.base_severity})" if result.base_score is not None else "—",
+    )
+    if result.exploitability_subscore is not None:
+        summary.add_row("Exploitability Sub-Score", str(result.exploitability_subscore))
+    if result.impact_subscore is not None:
+        summary.add_row("Impact Sub-Score", str(result.impact_subscore))
+    if result.temporal_score is not None:
+        summary.add_row("Temporal Score", f"{result.temporal_score} ({result.temporal_severity})")
+    if result.environmental_score is not None:
+        summary.add_row(
+            "Environmental Score",
+            f"{result.environmental_score} ({result.environmental_severity})",
+        )
+    for note in result.notes:
+        summary.add_row("Note", note)
+
+    mtbl = Table(title="Metric Vector Breakdown")
+    mtbl.add_column("Group", no_wrap=True)
+    mtbl.add_column("Metric", style="cyan")
+    mtbl.add_column("Code", no_wrap=True)
+    mtbl.add_column("Meaning")
+    for m in result.metrics:
+        mtbl.add_row(m.group, f"{m.name} ({m.metric})", m.code, m.value_label)
+    _emit_tables([summary, mtbl], console=console, out_file=out_file, stdout=stdout)

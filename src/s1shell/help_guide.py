@@ -499,7 +499,8 @@ MODULE_GUIDES: tuple[ModuleGuide, ...] = (
                 "s1shell mcp config [antigravity|claude|cursor|vscode|windsurf|http]",
                 "Print ready-to-paste JSON config for AI IDEs and MCP clients.",
                 (
-                    "s1shell mcp config antigravity --transport http --url http://127.0.0.1:8765/mcp",
+                    "s1shell mcp config antigravity --transport http --url "
+                    "http://127.0.0.1:8765/mcp",
                 ),
             ),
             SubcommandGuide(
@@ -668,6 +669,156 @@ MODULE_GUIDES: tuple[ModuleGuide, ...] = (
             "s1shell tor status",
             "s1shell tor check",
             "s1shell intel ct example.com --tor",
+        ),
+    ),
+    ModuleGuide(
+        name="scan",
+        group="Passive OSINT, CVE & SBOM",
+        network="Offline (Zero Network)",
+        summary=(
+            "Offline local security scanner: redacted secret/credential leak detection "
+            "(filesystem & git diffs), IaC/config auditing "
+            "(Dockerfile/K8s/GHA/Compose/NGINX/SSHd), "
+            "and CycloneDX 1.5 SBOM generation."
+        ),
+        usage="s1shell scan <secrets|config|sbom> [path] [options]",
+        subcommands=(
+            SubcommandGuide(
+                name="secrets",
+                usage=(
+                    "s1shell scan secrets [path] [--git-staged | --git-diff REF] [--fail-on SEV] "
+                    "[--format sarif]"
+                ),
+                summary=(
+                    "Detect 27+ secret & credential patterns with redaction, entropy checks & git "
+                    "diff support."
+                ),
+                examples=(
+                    "s1shell scan secrets .",
+                    "s1shell scan secrets . --git-staged --fail-on HIGH",
+                    "s1shell scan secrets ./repo --format sarif --out secrets.sarif",
+                ),
+            ),
+            SubcommandGuide(
+                name="config",
+                usage="s1shell scan config [path] [--fail-on SEV] [--format table|json|md|sarif]",
+                summary=(
+                    "Audit Dockerfiles, K8s YAML, GitHub Actions, Docker Compose, NGINX, SSHd & "
+                    ".env."
+                ),
+                examples=(
+                    "s1shell scan config .",
+                    "s1shell scan config ./deploy --fail-on HIGH --format sarif --out iac.sarif",
+                ),
+            ),
+            SubcommandGuide(
+                name="sbom",
+                usage="s1shell scan sbom [path] [--raw-bom] [--out sbom.cdx.json]",
+                summary=(
+                    "Generate a CycloneDX 1.5 JSON SBOM from local lockfiles, manifests & "
+                    "Dockerfiles."
+                ),
+                examples=(
+                    "s1shell scan sbom . --raw-bom --out sbom.cdx.json",
+                    "s1shell cve audit sbom.cdx.json --enrich",
+                ),
+            ),
+        ),
+        key_flags=(
+            "--git-staged",
+            "--git-diff REF",
+            "--no-gitignore",
+            "--fail-on SEV",
+            "--raw-bom",
+        ),
+        examples=(
+            "s1shell scan secrets . --git-staged --fail-on HIGH",
+            "s1shell scan config . --format sarif --out iac.sarif",
+            "s1shell scan sbom . --raw-bom --out sbom.cdx.json",
+        ),
+    ),
+    ModuleGuide(
+        name="analyze",
+        group="Defensive AI, Offline Codec, Reports & MCP",
+        network="Offline (Optional Passive DNS for `email`)",
+        summary=(
+            "Deep security analyzers: CSP3 bypass-gadget evaluator, SPF/DMARC/DKIM key-strength "
+            "auditor, offline raw HTTP header posture scorer, and FIRST CVSS v3.x/v4.0 calculator."
+        ),
+        usage="s1shell analyze <csp|email|headers|cvss> [args]",
+        subcommands=(
+            SubcommandGuide(
+                name="csp",
+                usage='s1shell analyze csp "<policy>" | --from-profile profile.json',
+                summary=(
+                    "Audit CSP3 directives, JSONP/CDN bypass hosts, nonces, duplicates & get "
+                    "hardened rewrite."
+                ),
+                examples=(
+                    "s1shell analyze csp \"default-src 'self'; script-src 'unsafe-inline' "
+                    'https://cdn.jsdelivr.net"',
+                    "s1shell analyze csp --from-profile ./results/target/assess.json",
+                ),
+            ),
+            SubcommandGuide(
+                name="email",
+                usage=(
+                    "s1shell analyze email <domain> [--spf REC] [--dmarc REC] [--dkim REC] "
+                    "[--selector SEL]"
+                ),
+                summary=(
+                    "Audit SPF lookup budget & IPv4 blast radius, DMARC alignment, and DKIM "
+                    "RSA/Ed25519 key bits."
+                ),
+                examples=(
+                    "s1shell analyze email example.com --selector google",
+                    's1shell analyze email example.com --offline --spf "v=spf1 +all" --dmarc '
+                    '"v=DMARC1; p=none"',
+                ),
+            ),
+            SubcommandGuide(
+                name="headers",
+                usage=(
+                    "s1shell analyze headers --file headers.txt [--url URL] [--preset "
+                    "web|api|strict]"
+                ),
+                summary=(
+                    "Run full security header, CSP3, cookie, CORS & stack fingerprint audit "
+                    "offline."
+                ),
+                examples=(
+                    "curl -sI https://example.com | s1shell analyze headers -",
+                    "s1shell analyze headers --file captured-headers.txt --preset strict",
+                ),
+            ),
+            SubcommandGuide(
+                name="cvss",
+                usage='s1shell analyze cvss "<CVSS:3.1/...>"',
+                summary=(
+                    "Decode & compute FIRST CVSS v3.0/v3.1 Base/Temporal/Environmental and v4.0 "
+                    "vectors."
+                ),
+                examples=(
+                    's1shell analyze cvss "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H"',
+                    "s1shell analyze cvss "
+                    '"CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/E:P/RL:O/RC:C"',
+                ),
+            ),
+        ),
+        key_flags=(
+            "--file FILE",
+            "--from-profile FILE",
+            "--spf",
+            "--dmarc",
+            "--dkim",
+            "--selector",
+            "--offline",
+            "--preset",
+        ),
+        examples=(
+            "s1shell analyze csp \"default-src 'self'; script-src https://unpkg.com\"",
+            "s1shell analyze email example.com --selector default",
+            's1shell analyze cvss "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"',
         ),
     ),
     ModuleGuide(

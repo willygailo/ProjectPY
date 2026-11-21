@@ -40,6 +40,14 @@ READONLY_INVESTIGATION_TOOLS: dict[str, str] = {
     "fingerprint_from_profile": "Offline tech fingerprinting from profile JSON (`profile_path`).",
     "assess_diff": "Offline baseline vs current assess diff (`baseline_path`, `current_path`).",
     "remediate": "Offline stack-tailored hardening snippets (`assess_path`, `stack`).",
+    "scan_secrets": "Offline local secret/credential exposure scanner (`path`).",
+    "scan_config": "Offline Dockerfile/K8s/GitHub Actions/Compose/NGINX/SSHd auditor (`path`).",
+    "analyze_csp": "Offline CSP3 bypass-gadget & directive evaluator (`policy` or `file_path`).",
+    "analyze_email": (
+        "Offline/passive SPF/DMARC/DKIM spoofing defense audit "
+        "(`domain`, `spf_record`, `dmarc_record`, `dkim_record`)."
+    ),
+    "analyze_cvss": "Offline FIRST CVSS v3.x/v4.0 calculator & decoder (`vector`).",
 }
 
 
@@ -233,6 +241,56 @@ class ReadOnlyToolExecutor:
                 stack=str(arguments.get("stack") or "auto"),
             )
             text = dumps_json(rem_res)
+            return text, json.loads(text)
+
+        if norm == "scan_secrets":
+            from s1shell.scan.service import ScanService
+
+            sec_res = ScanService(self.cfg, audit_logger=self.audit_logger).secrets(
+                Path(str(arguments.get("path", "")))
+            )
+            text = dumps_json(sec_res)
+            return text, json.loads(text)
+
+        if norm == "scan_config":
+            from s1shell.scan.service import ScanService
+
+            cfg_res = ScanService(self.cfg, audit_logger=self.audit_logger).config(
+                Path(str(arguments.get("path", "")))
+            )
+            text = dumps_json(cfg_res)
+            return text, json.loads(text)
+
+        if norm == "analyze_csp":
+            from s1shell.analyze.service import AnalyzeService
+
+            fp = arguments.get("file_path")
+            csp_res = AnalyzeService(self.cfg).csp(
+                policy=arguments.get("policy"),
+                file_path=Path(str(fp)) if fp else None,
+            )
+            text = dumps_json(csp_res)
+            return text, json.loads(text)
+
+        if norm == "analyze_email":
+            from s1shell.analyze.service import AnalyzeService
+
+            em_res = AnalyzeService(self.cfg).email(
+                str(arguments.get("domain", "")),
+                spf_record=arguments.get("spf_record"),
+                dmarc_record=arguments.get("dmarc_record"),
+                dkim_record=arguments.get("dkim_record"),
+                dkim_selector=arguments.get("dkim_selector"),
+                offline=bool(arguments.get("offline", True)),
+            )
+            text = dumps_json(em_res)
+            return text, json.loads(text)
+
+        if norm == "analyze_cvss":
+            from s1shell.analyze.service import AnalyzeService
+
+            cvss_res = AnalyzeService(self.cfg).cvss(str(arguments.get("vector", "")))
+            text = dumps_json(cvss_res)
             return text, json.loads(text)
 
         raise ValidationError(f"Unsupported read-only tool '{tool_name}'.")

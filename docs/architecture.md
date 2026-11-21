@@ -1,8 +1,8 @@
-# S1shell Architecture (`v0.5.0` — 16 Modules)
+# S1shell Architecture (`v0.5.0` — 18 Modules)
 
 ## Overview
 
-S1shell separates **public vulnerability, SBOM & passive threat intelligence** (`cve`, `intel`), **target-touching read-only assessment** (`profile`, live `fingerprint`, `assess`), **defensive AI tactics & read-only ReAct investigation** (`ai`), **offline codec, remediation & drift analysis** (`codec`, `remediate`, `diff`, `report`), **online Streamable HTTP & local stdio MCP** (`mcp`), **zero-leak Tor SOCKS5h routing** (`tor`), and **local governance diagnostics** (`scope`, `audit`, `doctor`, `completion`) behind a mandatory fail-closed policy gate.
+S1shell separates **public vulnerability, SBOM & passive threat intelligence** (`cve`, `intel`), **offline local security scanning** (`scan`: secrets, IaC/config, CycloneDX 1.5 SBOM), **deep security policy & crypto analyzers** (`analyze`: CSP3, Email Auth SPF/DMARC/DKIM, offline HTTP headers, FIRST CVSS v3.x/v4.0), **target-touching read-only assessment** (`profile`, live `fingerprint`, `assess`), **defensive AI tactics & read-only ReAct investigation** (`ai`), **offline codec, remediation & drift analysis** (`codec`, `remediate`, `diff`, `report`), **online Streamable HTTP & local stdio MCP** (`mcp`), **zero-leak Tor SOCKS5h routing** (`tor`), and **local governance diagnostics** (`scope`, `audit`, `doctor`, `completion`) behind a mandatory fail-closed policy gate.
 
 ```text
   CLI (`cli.py` + `output.py`) & Online Streamable HTTP / Stdio MCP (`mcp_server.py`)
@@ -23,20 +23,21 @@ S1shell separates **public vulnerability, SBOM & passive threat intelligence** (
      │         (Optional `--tor` routes all public feeds via local `socks5h://127.0.0.1:9050`)
      │
      ├── 3. Defensive AI Engine (`ai/skills.py`, `ai/pipelines.py`, `ai/investigate.py`, `ai/verify.py`)
-     │      ├─ 9 Bundled Skills (`skills.yaml`) + custom `~/.s1shell/skills.d/*.yaml`
+     │      ├─ 10 Bundled Skills (`skills.yaml`) + custom `~/.s1shell/skills.d/*.yaml`
      │      ├─ Signal-First Distiller (`distill.py`) + Nonce-Tagged `<untrusted_telemetry>` Guardrails
      │      ├─ Reversible NDA Redactor (`redact.py`: `--redact --restore`) + Citation Grounding Verifier
      │      ├─ Multi-Stage Pipelines (`deep-triage`, `purple-team`, `executive-pack`) & `--structured` JSON
-     │      └─ Bounded Read-Only ReAct Investigator (`ai investigate`) & Interactive Copilot (`ai chat`)
-     │         (Local Ollama `--local-only` auto-bypasses Tor; Anthropic, OpenAI-compat, Gemini)
+     │      └─ Bounded Read-Only ReAct Investigator (`ai investigate`: 14 tools) & Interactive Copilot (`ai chat`)
+     │         (Local Ollama `--local-only` auto-bypasses Tor; Anthropic, OpenAI-compat, Gemini, Builtin)
      │
-     ├── 4. Offline Codec, Playbooks & Reporting (`codec`, `remediate`, `diff`, `report`)
-     │      └─ 25-Codec CyberChef-style Decoder/Inspector (`codec`), Stack Playbooks, Drift Gate (`exit 4`),
-     │         Autoescaped Self-Contained HTML, Markdown, JSON, & SARIF 2.1.0
+     ├── 4. Offline Scanners, Analyzers, Codec, Playbooks & Reporting (`scan`, `analyze`, `codec`, `remediate`, `diff`, `report`)
+     │      └─ Secret Scanner (`--git-staged`/SARIF), IaC Auditor (Docker/K8s/GHA/Compose/NGINX/SSHd),
+     │         CycloneDX 1.5 SBOM Gen, CSP3 / Email Auth / Offline Headers / CVSS Analyzer,
+     │         25-Codec Decoder/Inspector (`codec`), Stack Playbooks (incl. Cloudflare/Traefik), Drift Gate (`exit 4`)
      │
      └── 5. Online Streamable HTTP & Stdio MCP (`mcp serve|config|ping`) + Diagnostics (`doctor`, `tor`)
-            └─ MCP `2025-03-26`: 23 default tools (+3 opt-in scoped target tools = 26),
-               4 live Resources, 9+ native Prompts, Bearer auth (`secrets.compare_digest`), & Origin guard
+            └─ MCP `2025-03-26`: 30 default tools (+3 opt-in scoped target tools = 33),
+               4 live Resources, 10+ native Prompts, Bearer auth (`secrets.compare_digest`), & Origin guard
 ```
 
 ## DNS Rebinding, Redirect, Exclusion, SSRF & Tor Zero-Leak Safeguards

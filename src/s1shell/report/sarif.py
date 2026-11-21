@@ -8,6 +8,7 @@ from typing import Any
 from s1shell import __version__
 from s1shell.config import DEFAULT_PROJECT_URL
 from s1shell.cve.models import DependencyAuditResult
+from s1shell.scan.models import ConfigScanResult, SecretScanResult
 
 _SARIF_SCHEMA = (
     "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json"
@@ -78,11 +79,19 @@ def build_sarif_payload(
 
         msg = f"{title}. Evidence: {evidence}" if evidence else title
         loc_uri = str(finding.get("uri") or target_uri or "target://unknown")
+        phys_loc: dict[str, Any] = {"artifactLocation": {"uri": loc_uri}}
+        raw_line = finding.get("line")
+        if isinstance(raw_line, int) and raw_line >= 1:
+            region: dict[str, Any] = {"startLine": raw_line}
+            raw_col = finding.get("column")
+            if isinstance(raw_col, int) and raw_col >= 1:
+                region["startColumn"] = raw_col
+            phys_loc["region"] = region
         res_entry: dict[str, Any] = {
             "ruleId": rule_id,
             "level": _SEV_TO_LEVEL.get(severity, "note"),
             "message": {"text": msg},
-            "locations": [{"physicalLocation": {"artifactLocation": {"uri": loc_uri}}}],
+            "locations": [{"physicalLocation": phys_loc}],
             "properties": {
                 "severity": severity,
                 "category": category,
@@ -167,4 +176,59 @@ def render_dependency_sarif(audit_result: DependencyAuditResult) -> str:
         findings=finding_dicts,
         target_uri=audit_result.source_file,
         tool_version=audit_result.tool_version,
+    )
+
+
+def render_secret_scan_sarif(scan_result: SecretScanResult) -> str:
+    """Serialize `s1shell scan secrets` findings into line-accurate SARIF 2.1.0 JSON."""
+    finding_dicts: list[dict[str, Any]] = []
+    for f in scan_result.findings:
+        finding_dicts.append(
+            {
+                "id": f.rule_id,
+                "severity": f.severity,
+                "category": "secrets",
+                "title": f.title,
+                "evidence": (
+                    f"Redacted match `{f.match_redacted}` (entropy={f.entropy}, fp={f.fingerprint})"
+                ),
+                "remediation": f.remediation,
+                "uri": f.file_path,
+                "line": f.line,
+                "column": f.column,
+                "cwe": f.cwe,
+                "owasp": f.owasp,
+                "nist": f.nist,
+            }
+        )
+    return render_sarif(
+        findings=finding_dicts,
+        target_uri=scan_result.target_path,
+        tool_version=scan_result.tool_version,
+    )
+
+
+def render_config_scan_sarif(scan_result: ConfigScanResult) -> str:
+    """Serialize `s1shell scan config` IaC findings into line-accurate SARIF 2.1.0 JSON."""
+    finding_dicts: list[dict[str, Any]] = []
+    for f in scan_result.findings:
+        finding_dicts.append(
+            {
+                "id": f.rule_id,
+                "severity": f.severity,
+                "category": f.category,
+                "title": f.title,
+                "evidence": f.evidence,
+                "remediation": f.remediation,
+                "uri": f.file_path,
+                "line": f.line,
+                "cwe": f.cwe,
+                "owasp": f.owasp,
+                "nist": f.nist,
+            }
+        )
+    return render_sarif(
+        findings=finding_dicts,
+        target_uri=scan_result.target_path,
+        tool_version=scan_result.tool_version,
     )
