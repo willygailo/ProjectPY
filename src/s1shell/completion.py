@@ -6,7 +6,7 @@ from s1shell.errors import ValidationError
 
 _MODULES = (
     "scope cve intel codec scan analyze profile fingerprint report audit doctor completion ai "
-    "assess diff remediate mcp tor help check"
+    "assess dump diff remediate mcp tor help check"
 )
 _COMMON_FLAGS = (
     "--format --out --verbose --no-color --authorized --scope-file --home "
@@ -46,7 +46,14 @@ _ASSESS_FLAGS = (
     "--check-methods --preset --ignore-finding --no-remediate --intel "
     "--skip-cve --enrich-cve --min-cvss --cve-limit --offline --ai --ai-provider "
     "--ai-mode --ai-skill --ai-pipeline --redact --restore --local-only "
-    f"--fail-on --min-score --operator --out-dir {_COMMON_FLAGS}"
+    "--fail-on --min-score --operator --out-dir --dump-evidence --no-body --redact-body "
+    f"{_COMMON_FLAGS}"
+)
+_DUMP_FLAGS = (
+    "--out-dir --no-body --redact-body --fast --no-tls-versions --no-dns-security "
+    "--no-well-known --no-methods --skip-cve --no-enrich-cve --skip-intel --skip-ct "
+    "--offline --min-cvss --cve-limit --preset --operator --archive "
+    f"{_COMMON_FLAGS}"
 )
 _INTEL_FLAGS = (
     "--set-nvd-key --set-github-key --set-vt-key --set-greynoise-key --set-urlscan-key "
@@ -179,6 +186,9 @@ _s1shell_completions() {{
         assess)
             COMPREPLY=( $(compgen -W "{_ASSESS_FLAGS}" -- "${{cur}}") )
             ;;
+        dump)
+            COMPREPLY=( $(compgen -W "{_DUMP_FLAGS}" -- "${{cur}}") )
+            ;;
         diff)
             COMPREPLY=( $(compgen -W "--fail-on-regression {_COMMON_FLAGS}" -- "${{cur}}") )
             ;;
@@ -264,6 +274,7 @@ _s1shell() {
         'completion:Generate shell completion scripts'
         'ai:Manage AI providers (.env) and run defensive analysis'
         'assess:All-in-one authorized target or batch assessment pipeline'
+        'dump:Export raw headers/body/TLS PEM, entities, analysis & SHA-256 manifest'
         'diff:Compare baseline vs current assessment artifacts'
         'remediate:Generate offline deterministic hardening config snippets'
         'mcp:Run online Streamable HTTP or local stdio read-only MCP server'
@@ -422,6 +433,7 @@ complete -c s1shell -n "__fish_use_subcommand" -a "doctor" -d "Run local diagnos
 complete -c s1shell -n "__fish_use_subcommand" -a "completion" -d "Generate shell completion"
 complete -c s1shell -n "__fish_use_subcommand" -a "ai" -d "AI providers and defensive analysis"
 complete -c s1shell -n "__fish_use_subcommand" -a "assess" -d "Single or batch target assessment"
+complete -c s1shell -n "__fish_use_subcommand" -a "dump" -d "Authorized target evidence dumper"
 complete -c s1shell -n "__fish_use_subcommand" -a "diff" -d "Compare baseline vs current assess"
 complete -c s1shell -n "__fish_use_subcommand" -a "remediate" -d "Offline hardening config playbook"
 complete -c s1shell -n "__fish_use_subcommand" -a "mcp" -d "Online HTTP or local stdio MCP server"

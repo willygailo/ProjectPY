@@ -82,6 +82,15 @@ secrets_scan.json
 config_scan.json
 csp_analysis.json
 email_auth.json
+evidence_manifest.json
+entities.json
+entities.csv
+dns_records.json
+tls_chain.pem
+response_headers.txt
+response_body.*
+ct.json
+ct_subdomains.txt
 targets.txt
 in_scope_urls.txt
 candidates.txt

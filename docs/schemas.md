@@ -19,6 +19,8 @@ All JSON outputs emitted with `--format json` include:
   - `"fingerprint_report"` (`s1shell fingerprint`)
   - `"assess_report"` (`s1shell assess`)
   - `"batch_assess_report"` (`s1shell assess --targets-file`)
+  - `"dump_report"` (`s1shell dump`)
+  - `"evidence_manifest"` (`<out_dir>/evidence_manifest.json` from `s1shell dump` / `assess --dump-evidence`)
   - `"assess_diff_report"` (`s1shell diff`)
   - `"remediation_plan"` (`s1shell remediate`)
   - `"assessment_report"` (`s1shell report build`)

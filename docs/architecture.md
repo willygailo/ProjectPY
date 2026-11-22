@@ -1,13 +1,13 @@
-# S1shell Architecture (`v0.5.0` — 18 Modules)
+# S1shell Architecture (`v0.5.0` — 19 Modules)
 
 ## Overview
 
-S1shell separates **public vulnerability, SBOM & passive threat intelligence** (`cve`, `intel`), **offline local security scanning** (`scan`: secrets, IaC/config, CycloneDX 1.5 SBOM), **deep security policy & crypto analyzers** (`analyze`: CSP3, Email Auth SPF/DMARC/DKIM, offline HTTP headers, FIRST CVSS v3.x/v4.0), **target-touching read-only assessment** (`profile`, live `fingerprint`, `assess`), **defensive AI tactics & read-only ReAct investigation** (`ai`), **offline codec, remediation & drift analysis** (`codec`, `remediate`, `diff`, `report`), **online Streamable HTTP & local stdio MCP** (`mcp`), **zero-leak Tor SOCKS5h routing** (`tor`), and **local governance diagnostics** (`scope`, `audit`, `doctor`, `completion`) behind a mandatory fail-closed policy gate.
+S1shell separates **public vulnerability, SBOM & passive threat intelligence** (`cve`, `intel`), **offline local security scanning** (`scan`: secrets, IaC/config, CycloneDX 1.5 SBOM), **deep security policy & crypto analyzers** (`analyze`: CSP3, Email Auth SPF/DMARC/DKIM, offline HTTP headers, FIRST CVSS v3.x/v4.0), **target-touching read-only assessment & chain-of-custody evidence dumping** (`profile`, live `fingerprint`, `assess`, `dump`), **defensive AI tactics & read-only ReAct investigation** (`ai`), **offline codec, remediation & drift analysis** (`codec`, `remediate`, `diff`, `report`), **online Streamable HTTP & local stdio MCP** (`mcp`), **zero-leak Tor SOCKS5h routing** (`tor`), and **local governance diagnostics** (`scope`, `audit`, `doctor`, `completion`) behind a mandatory fail-closed policy gate.
 
 ```text
   CLI (`cli.py` + `output.py`) & Online Streamable HTTP / Stdio MCP (`mcp_server.py`)
      │
-     ├── 1. Target Commands (`profile`, live `fingerprint`, `assess [--targets-file]`)
+     ├── 1. Target Commands (`profile`, live `fingerprint`, `assess [--targets-file]`, `dump`)
      │      │
      │      ▼
      │   Policy Gate (`guard.py`)
@@ -15,7 +15,8 @@ S1shell separates **public vulnerability, SBOM & passive threat intelligence** (
      │      ├─ b. Check deny-first `--exclude` -> active allow + DNS/DoH-over-Tor anti-SSRF -> Exit 2
      │      ├─ c. Confirm `--authorized` or interactive TTY prompt -> Exit 3
      │      ├─ d. Execute bounded single-GET / OPTIONS + TLS (`target_fetch.py` / `http.py` / `tor.py`)
-     │      └─ e. Append file-locked (`fcntl.flock`) O(1) SHA-256 hash-chained record (`audit.py`)
+     │      ├─ e. Optional `0700`/`0600` evidence bundle (`dump/exporter.py`: raw/, well_known/, entities/, analysis/, SHA-256 manifest)
+     │      └─ f. Append file-locked (`fcntl.flock`) O(1) SHA-256 hash-chained record (`audit.py`)
      │
      ├── 2. Passive Intel & Supply-Chain (`cve`, `intel`) — Zero Target Contact
      │      └─ SQLite TTL Cache (`cve/cache.py`) + HTTP 429/502/503/504 Retry-After Backoff

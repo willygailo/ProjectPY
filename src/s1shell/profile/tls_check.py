@@ -423,6 +423,21 @@ def _probe_tls_versions(
     return supported, client_blocked
 
 
+def der_chain_to_pem(der_chain: list[bytes]) -> str:
+    """Convert a list of DER-encoded X.509 certificates into a concatenated PEM bundle."""
+    blocks: list[str] = []
+    for der in der_chain:
+        if not der:
+            continue
+        try:
+            cert = x509.load_der_x509_certificate(der)
+            blocks.append(cert.public_bytes(serialization.Encoding.PEM).decode("ascii").strip())
+        except Exception:
+            b64 = base64.encodebytes(der).decode("ascii").strip()
+            blocks.append(f"-----BEGIN CERTIFICATE-----\n{b64}\n-----END CERTIFICATE-----")
+    return ("\n".join(blocks) + "\n") if blocks else ""
+
+
 def inspect_tls(
     *,
     host: str,
@@ -433,6 +448,7 @@ def inspect_tls(
     cafile: str | None = None,
     check_versions: bool = False,
     tor_proxy: str | None = None,
+    chain_pem_out: list[str] | None = None,
 ) -> tuple[TLSResult, str | None]:
     """Perform a single TLS handshake (or optional bounded version checks) and parse X.509 cert."""
     verified = False
@@ -476,6 +492,10 @@ def inspect_tls(
 
     cert_meta = _parse_x509_der(der_bytes) if der_bytes else _ParsedX509()
     chain_entries, chain_issues = analyze_cert_chain(der_chain) if der_chain else ([], [])
+    if chain_pem_out is not None:
+        pem_bundle = der_chain_to_pem(der_chain or ([der_bytes] if der_bytes else []))
+        if pem_bundle:
+            chain_pem_out.append(pem_bundle)
 
     client_blocked: list[str] = []
     if check_versions:

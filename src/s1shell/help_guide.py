@@ -105,6 +105,7 @@ MODULE_GUIDES: tuple[ModuleGuide, ...] = (
             "--ai / --ai-skill / --ai-pipeline",
             "--fail-on SEV / --min-score N",
             "--out-dir DIR",
+            "--dump-evidence [--no-body] [--redact-body]",
         ),
         examples=(
             (
@@ -123,6 +124,36 @@ MODULE_GUIDES: tuple[ModuleGuide, ...] = (
                 "s1shell assess --targets-file targets.txt --authorized --delay 1.0 "
                 "--out-dir ./results/batch"
             ),
+        ),
+    ),
+    ModuleGuide(
+        name="dump",
+        group="Target Profiling & Assessment",
+        network="Scoped Target (Read-Only) + Optional Passive Feeds",
+        summary=(
+            "Export a complete 0700/0600 chain-of-custody evidence bundle from an authorized URL: "
+            "raw headers & bounded body, TLS PEM chain, DNS JSON, RFC well-known files, surface "
+            "entities CSV/JSON, offline CSP3/email/hardening analyses, reports, & SHA-256 manifest."
+        ),
+        usage="s1shell dump <target_url> --authorized --out-dir DIR [options]",
+        key_flags=(
+            "--authorized",
+            "--out-dir DIR",
+            "--no-body",
+            "--redact-body",
+            "--fast",
+            "--skip-cve / --skip-intel / --skip-ct",
+            "--preset {web,api,strict}",
+            "--archive",
+        ),
+        examples=(
+            "s1shell dump https://example.com --authorized --out-dir ./results/example-dump",
+            (
+                "s1shell dump https://example.com --authorized --fast --redact-body "
+                "--archive --out-dir ./results/example-fast"
+            ),
+            "s1shell analyze headers --file ./results/example-dump/raw/response_headers.txt",
+            "s1shell codec inspect --file ./results/example-dump/raw/tls_chain.pem",
         ),
     ),
     ModuleGuide(

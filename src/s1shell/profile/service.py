@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ssl
+from dataclasses import dataclass, field
 
 import httpx
 
@@ -18,6 +19,20 @@ from s1shell.profile.well_known import inspect_http_methods, inspect_well_known
 from s1shell.scope import ScopeManager
 from s1shell.target_fetch import TLSInspectorFn, fetch_target_snapshot
 from s1shell.tor import TorDoHResolver, is_v3_onion_host
+
+
+@dataclass(frozen=True)
+class RawCaptureBundle:
+    """Raw publicly served response, TLS PEM chain, and well-known files captured passively."""
+
+    status_code: int
+    http_version: str
+    raw_headers: list[tuple[str, str]]
+    body_bytes: bytes
+    body_truncated: bool
+    content_type: str | None = None
+    tls_chain_pem: str | None = None
+    well_known_files: dict[str, bytes] = field(default_factory=dict)
 
 
 class ProfileService:
@@ -61,6 +76,7 @@ class ProfileService:
         check_dns_security: bool = False,
         check_well_known: bool = False,
         check_methods: bool = False,
+        capture_out: list[RawCaptureBundle] | None = None,
     ) -> ProfileResult:
         """Profile a single authorized target (1 HTTP request + 1 TLS handshake by default)."""
 
@@ -99,6 +115,7 @@ class ProfileService:
                 http_transport=self.http_transport,
                 cafile=self.cafile,
                 check_tls_versions=check_tls_versions,
+                capture_pem=(capture_out is not None),
             )
             effective_ip = snapshot.connected_ip or pinned_ip
             resp = snapshot.response
@@ -149,6 +166,7 @@ class ProfileService:
             )
 
             well_known: WellKnownCheck | None = None
+            raw_wk_files: dict[str, bytes] = {}
             if check_well_known:
                 well_known = inspect_well_known(
                     self.cfg,
@@ -157,6 +175,22 @@ class ProfileService:
                     pinned_ips=ctx.scope_result.resolved_ips,
                     verify=verify_arg,
                     http_transport=self.http_transport,
+                    raw_files_out=raw_wk_files if capture_out is not None else None,
+                )
+
+            if capture_out is not None:
+                ctype = next((v for k, v in resp.headers if k.lower() == "content-type"), None)
+                capture_out.append(
+                    RawCaptureBundle(
+                        status_code=resp.status_code,
+                        http_version=resp.http_version,
+                        raw_headers=list(resp.headers),
+                        body_bytes=resp.body,
+                        body_truncated=resp.truncated,
+                        content_type=ctype,
+                        tls_chain_pem=snapshot.tls_chain_pem,
+                        well_known_files=raw_wk_files,
+                    )
                 )
 
             return ProfileResult(

@@ -39,12 +39,12 @@
 
 ```mermaid
 flowchart LR
-    CLI["s1shell CLI\n(18 Modules · --tor / --tor-targets)"] --> GATE["Policy Gate\nScope -> Auth -> IP Pin / Tor SOCKS5h -> SHA-256 Audit"]
+    CLI["s1shell CLI\n(19 Modules · --tor / --tor-targets)"] --> GATE["Policy Gate\nScope -> Auth -> IP Pin / Tor SOCKS5h -> SHA-256 Audit"]
     CLI --> INTEL["Zero-Target-Contact Intel\n7 Feeds · SQLite Cache · Optional --tor"]
     CLI --> AI["Defensive AI Engine\n10 Skills · Pipelines · ReAct (14 Tools) · Builtin"]
     CLI --> OFFLINE["Offline Tools & Online MCP\nScan · Analyze · Codec · Remediate · Diff · MCP"]
 
-    GATE --> TARGET["profile · fingerprint · assess\nClearnet + Authorized v3 .onion"]
+    GATE --> TARGET["profile · fingerprint · assess · dump\nClearnet + Authorized v3 .onion"]
     INTEL --> FEEDS["NVD · CVE.org · OSV.dev · KEV · EPSS\nVT · GreyNoise · urlscan · GHSA · crt.sh · RDAP"]
     AI --> MODELS["Builtin Offline · Local Ollama (--local-only)\nAnthropic · OpenAI-Compat · Gemini"]
     OFFLINE --> OUT["HTML · MD · JSON · SARIF 2.1.0 · CycloneDX 1.5\n30–33 MCP Tools · Resources · Prompts"]
@@ -676,6 +676,47 @@ s1shell fingerprint --from-profile ./results/profile.json \
 s1shell assess https://www.target.com --authorized \
   --tor --tor-targets --skip-cve --out-dir ./results/target-tor
 s1shell diff ./results/target-com/assess.json ./results/target-tor/assess.json
+```
+
+#### 3.3 Authorized Target Evidence & Surface Dumper (`s1shell dump` & `assess --dump-evidence`)
+
+Persist raw publicly served artifacts collected during the single guarded handshake/GET alongside surface entities, deep offline analyses, reports, and a `0700`/`0600` SHA-256 chain-of-custody manifest (`evidence_manifest.json`) — strictly scope-gated (`scope.yaml` -> `--authorized` -> SHA-256 `audit.log`):
+
+```bash
+# Full authorized target evidence bundle (raw headers/body, TLS PEM, DNS, well-known, entities CSV/JSON, analysis, OSINT & reports)
+s1shell dump https://www.target.com --authorized --out-dir ./results/target-dump
+
+# Fast local capture (skip external CVE/intel/CT), redact body tokens/emails, & create a 0600 .tar.gz archive
+s1shell dump https://www.target.com --authorized --fast --redact-body --archive \
+  --out-dir ./results/target-dump-fast
+
+# Or attach raw evidence export directly to `s1shell assess --out-dir`
+s1shell assess https://www.target.com --authorized --well-known --dump-evidence \
+  --out-dir ./results/target-com
+
+# Feed dumped raw evidence directly back into S1shell's offline analyzers
+s1shell analyze headers --file ./results/target-dump/raw/response_headers.txt
+s1shell codec inspect --file ./results/target-dump/raw/tls_chain.pem
+```
+
+```text
+results/target-dump/
+├── evidence_manifest.json         # Scope ref, pinned IP, UTC time & SHA-256 digest of every file
+├── raw/
+│   ├── response_headers.txt       # Exact HTTP status line + raw headers (for `analyze headers`)
+│   ├── response_body.html         # Bounded 2 MiB public response body (--no-body / --redact-body)
+│   ├── tls_chain.pem              # Full presented X.509 PEM chain (for `codec inspect`)
+│   └── dns_records.json           # Passive DNS records (A, AAAA, CNAME, MX, NS, TXT, CAA, SPF, DMARC)
+├── well_known/                    # Raw HTTP 200 RFC metadata (security.txt, robots.txt, OIDC, JWKS)
+├── entities/
+│   ├── entities.json              # Deduplicated surface entities (SANs, emails, phones, keys, redacted leaks)
+│   └── entities.csv               # Flat spreadsheet-ready export (category,source,value)
+├── analysis/
+│   ├── csp_analysis.json          # Offline CSP3 bypass & directive audit
+│   ├── email_auth.json            # Offline SPF/DMARC anti-spoofing audit
+│   └── hardening.md               # Offline stack-tailored remediation snippets
+├── osint/                         # Passive intel.json, ct.json & ct_subdomains.txt (when enabled)
+└── reports/                       # assess.json, profile.json, fingerprint.json, cves.json, HTML/MD/SARIF
 ```
 
 ---

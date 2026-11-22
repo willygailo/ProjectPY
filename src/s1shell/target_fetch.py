@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import ssl
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -17,6 +18,23 @@ from s1shell.tor import is_v3_onion_host
 TLSInspectorFn = Callable[..., tuple[TLSResult, str | None]]
 
 
+def _supports_kwarg(fn: Callable[..., object], name: str) -> bool:
+    """Return True if `fn` accepts keyword argument `name` or `**kwargs`."""
+    try:
+        sig = inspect.signature(fn)
+    except (TypeError, ValueError):
+        return False
+    for param in sig.parameters.values():
+        if param.kind == inspect.Parameter.VAR_KEYWORD:
+            return True
+        if param.name == name and param.kind in (
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            inspect.Parameter.KEYWORD_ONLY,
+        ):
+            return True
+    return False
+
+
 @dataclass(frozen=True)
 class TargetSnapshot:
     """Result of a single guarded TLS handshake + bounded HTTP GET."""
@@ -27,6 +45,7 @@ class TargetSnapshot:
     alpn_protocol: str | None
     response: BoundedResponse
     connected_ip: str | None = None
+    tls_chain_pem: str | None = None
 
 
 def fetch_target_snapshot(
@@ -39,6 +58,7 @@ def fetch_target_snapshot(
     http_transport: httpx.BaseTransport | None = None,
     cafile: str | None = None,
     check_tls_versions: bool = False,
+    capture_pem: bool = False,
 ) -> TargetSnapshot:
     """Perform optional single TLS inspection followed by a single guarded GET (direct or Tor)."""
     is_onion = not parsed.is_ip and is_v3_onion_host(parsed.host)
@@ -53,31 +73,40 @@ def fetch_target_snapshot(
 
     tls_result: TLSResult | None = None
     alpn_proto: str | None = None
+    pem_bucket: list[str] = []
+    pass_pem_kwarg = capture_pem and _supports_kwarg(tls_inspector, "chain_pem_out")
     if is_https:
         if tor_proxy is not None:
-            tls_result, alpn_proto = tls_inspector(
-                host=parsed.host,
-                pinned_ip=effective_ip,
-                port=port,
-                timeout=cfg.timeout_seconds,
-                is_ip=parsed.is_ip,
-                cafile=cafile,
-                check_versions=check_tls_versions,
-                tor_proxy=tor_proxy,
-            )
+            tls_kwargs: dict[str, object] = {
+                "host": parsed.host,
+                "pinned_ip": effective_ip,
+                "port": port,
+                "timeout": cfg.timeout_seconds,
+                "is_ip": parsed.is_ip,
+                "cafile": cafile,
+                "check_versions": check_tls_versions,
+                "tor_proxy": tor_proxy,
+            }
+            if pass_pem_kwarg:
+                tls_kwargs["chain_pem_out"] = pem_bucket
+            tls_result, alpn_proto = tls_inspector(**tls_kwargs)
         else:
             last_tls_exc: Exception | None = None
             for idx, candidate_ip in enumerate(validated_ips):
+                pem_bucket.clear()
                 try:
-                    tls_result, alpn_proto = tls_inspector(
-                        host=parsed.host,
-                        pinned_ip=candidate_ip,
-                        port=port,
-                        timeout=cfg.timeout_seconds,
-                        is_ip=parsed.is_ip,
-                        cafile=cafile,
-                        check_versions=check_tls_versions,
-                    )
+                    tls_kwargs = {
+                        "host": parsed.host,
+                        "pinned_ip": candidate_ip,
+                        "port": port,
+                        "timeout": cfg.timeout_seconds,
+                        "is_ip": parsed.is_ip,
+                        "cafile": cafile,
+                        "check_versions": check_tls_versions,
+                    }
+                    if pass_pem_kwarg:
+                        tls_kwargs["chain_pem_out"] = pem_bucket
+                    tls_result, alpn_proto = tls_inspector(**tls_kwargs)
                     effective_ip = candidate_ip
                     last_tls_exc = None
                     break
@@ -138,4 +167,5 @@ def fetch_target_snapshot(
         alpn_protocol=alpn_proto,
         response=resp,
         connected_ip=connected_ip,
+        tls_chain_pem=pem_bucket[0] if pem_bucket else None,
     )

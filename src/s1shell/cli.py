@@ -26,6 +26,7 @@ from s1shell.cve.audit_deps import DependencyAuditService
 from s1shell.cve.models import CVESearchFilter
 from s1shell.cve.service import CVEService
 from s1shell.doctor import run_doctor
+from s1shell.dump.service import DumpService
 from s1shell.errors import ExitCode, PolicyGateError, S1ShellError, ValidationError
 from s1shell.fingerprint.service import FingerprintService
 from s1shell.help_guide import (
@@ -68,6 +69,7 @@ from s1shell.output import (
     render_cvss_analysis,
     render_dependency_audit,
     render_doctor_report,
+    render_dump_result,
     render_email_analysis,
     render_fingerprint_result,
     render_ghsa_advisories,
@@ -877,6 +879,129 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Save all JSON/SARIF artifacts and HTML/MD reports into DIR.",
     )
+    assess_p.add_argument(
+        "--dump-evidence",
+        action="store_true",
+        help=(
+            "With --out-dir, also export raw headers/body, TLS PEM chain, well-known files, "
+            "entities CSV/JSON, offline CSP/email analyses, and SHA-256 evidence_manifest.json."
+        ),
+    )
+    assess_p.add_argument(
+        "--no-body",
+        action="store_true",
+        help="With --dump-evidence, omit saving raw/response_body.*.",
+    )
+    assess_p.add_argument(
+        "--redact-body",
+        action="store_true",
+        help="With --dump-evidence, mask emails, IPs, tokens, and secret patterns in saved body.",
+    )
+
+    # --- dump ---
+    dump_p = modules.add_parser(
+        "dump",
+        parents=[common],
+        help=(
+            "Export full authorized target evidence bundle (headers, body, TLS PEM, well-known, "
+            "entities CSV/JSON, deep analysis, reports, & SHA-256 manifest)."
+        ),
+    )
+    dump_p.add_argument("target", help="Authorized URL, domain, IPv4, IPv6, or v3 .onion.")
+    dump_p.add_argument(
+        "--out-dir",
+        type=Path,
+        default=None,
+        help="Output directory for the 0700/0600 evidence bundle (default: ./results/<slug>).",
+    )
+    dump_p.add_argument(
+        "--no-body",
+        action="store_true",
+        help="Omit saving raw/response_body.* (keep headers, TLS PEM, DNS, entities & reports).",
+    )
+    dump_p.add_argument(
+        "--redact-body",
+        action="store_true",
+        help="Mask IPs, emails, tokens, JWTs, and secret literals inside raw/response_body.*.",
+    )
+    dump_p.add_argument(
+        "--fast",
+        action="store_true",
+        help="Fast local capture: skip external CVE, threat-intel, and crt.sh CT log lookups.",
+    )
+    dump_p.add_argument(
+        "--no-tls-versions",
+        action="store_true",
+        help="Skip bounded TLS 1.0-1.3 protocol matrix probe.",
+    )
+    dump_p.add_argument(
+        "--no-dns-security",
+        action="store_true",
+        help="Skip passive DNS hygiene queries (CAA/SPF/DMARC/MTA-STS/DNSSEC).",
+    )
+    dump_p.add_argument(
+        "--no-well-known",
+        action="store_true",
+        help="Skip read-only RFC well-known metadata fetches (security.txt, robots.txt, OIDC).",
+    )
+    dump_p.add_argument(
+        "--no-methods",
+        action="store_true",
+        help="Skip the single read-only OPTIONS Allow-method check.",
+    )
+    dump_p.add_argument(
+        "--skip-cve",
+        action="store_true",
+        help="Skip public NVD/CVE correlation.",
+    )
+    dump_p.add_argument(
+        "--no-enrich-cve",
+        action="store_true",
+        help="Skip CISA KEV and FIRST EPSS enrichment on correlated CVEs.",
+    )
+    dump_p.add_argument(
+        "--skip-intel",
+        action="store_true",
+        help="Skip passive VirusTotal, GreyNoise, urlscan.io, and RDAP lookups.",
+    )
+    dump_p.add_argument(
+        "--skip-ct",
+        action="store_true",
+        help="Skip passive crt.sh Certificate Transparency log lookup.",
+    )
+    dump_p.add_argument(
+        "--offline",
+        action="store_true",
+        help="Read external CVE/intel/CT lookups from local SQLite cache only.",
+    )
+    dump_p.add_argument(
+        "--min-cvss",
+        type=float,
+        default=7.0,
+        help="Minimum CVSS base score for correlated CVEs (default: 7.0).",
+    )
+    dump_p.add_argument(
+        "--cve-limit",
+        type=int,
+        default=10,
+        help="Maximum correlated CVEs to include (default: 10).",
+    )
+    dump_p.add_argument(
+        "--preset",
+        choices=list(SUPPORTED_PRESETS),
+        default="web",
+        help="Posture scoring preset: web (default), api, or strict.",
+    )
+    dump_p.add_argument(
+        "--operator",
+        default=None,
+        help="Operator name recorded in generated reports.",
+    )
+    dump_p.add_argument(
+        "--archive",
+        action="store_true",
+        help="Also bundle the 0600 evidence directory into a sibling .tar.gz archive with SHA-256.",
+    )
 
     # --- diff ---
     diff_p = modules.add_parser(
@@ -1456,6 +1581,7 @@ def dispatch(
     report_service: ReportService | None = None,
     ai_service: AIService | None = None,
     assess_service: AssessService | None = None,
+    dump_service: DumpService | None = None,
     stdin: TextIO | None = None,
     stdout: TextIO | None = None,
     stderr: TextIO | None = None,
@@ -2004,6 +2130,9 @@ def dispatch(
                 include_remediation=not bool(args.no_remediate),
                 operator=args.operator,
                 out_dir=args.out_dir,
+                dump_evidence=bool(args.dump_evidence),
+                include_body=not bool(args.no_body),
+                redact_body=bool(args.redact_body),
             )
             render_batch_assessment(
                 batch_res,
@@ -2065,6 +2194,9 @@ def dispatch(
             include_remediation=not bool(args.no_remediate),
             operator=args.operator,
             out_dir=args.out_dir,
+            dump_evidence=bool(args.dump_evidence),
+            include_body=not bool(args.no_body),
+            redact_body=bool(args.redact_body),
         )
         render_assessment_result(
             assess_res,
@@ -2083,6 +2215,47 @@ def dispatch(
         )
         if gate_failure:
             raise PolicyGateError(f"CI policy gate failed: {gate_failure}")
+        return int(ExitCode.SUCCESS)
+
+    if args.module == "dump":
+        fmt = str(_opt(args, "fmt", "table"))
+        dump_svc = (
+            dump_service
+            if dump_service is not None
+            else DumpService(
+                cfg,
+                scope_manager=scope_mgr,
+                audit_logger=audit_log,
+                profile_service=profile_service,
+                assess_service=assess_service,
+                cve_service=cve_service,
+                intel_service=intel_service,
+                report_service=report_service,
+            )
+        )
+        dump_res = dump_svc.dump(
+            args.target,
+            authorized=authorized,
+            out_dir=args.out_dir,
+            include_body=not bool(args.no_body),
+            redact_body=bool(args.redact_body),
+            fast=bool(args.fast),
+            check_tls_versions=not bool(args.no_tls_versions),
+            check_dns_security=not bool(args.no_dns_security),
+            check_well_known=not bool(args.no_well_known),
+            check_methods=not bool(args.no_methods),
+            skip_cve=bool(args.skip_cve),
+            enrich_cve=not bool(args.no_enrich_cve),
+            run_intel=not bool(args.skip_intel),
+            run_ct=not bool(args.skip_ct),
+            offline=bool(args.offline),
+            min_cvss=args.min_cvss,
+            cve_limit=args.cve_limit,
+            preset=args.preset,
+            operator=args.operator,
+            archive=bool(args.archive),
+        )
+        render_dump_result(dump_res, fmt=fmt, console=console, out_file=out_file, stdout=stdout)
         return int(ExitCode.SUCCESS)
 
     if args.module == "diff":

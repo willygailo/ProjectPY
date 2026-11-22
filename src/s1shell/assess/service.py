@@ -39,7 +39,7 @@ from s1shell.fingerprint.service import FingerprintService
 from s1shell.intel.models import IntelLookupResult
 from s1shell.intel.service import IntelService
 from s1shell.models import dumps_json, to_json_compatible, utc_now_iso
-from s1shell.profile.service import ProfileService
+from s1shell.profile.service import ProfileService, RawCaptureBundle
 from s1shell.report.models import ReportBundle, ReportMetadata
 from s1shell.report.service import ReportService
 from s1shell.scope import ScopeManager
@@ -186,19 +186,31 @@ class AssessService:
         include_remediation: bool = True,
         operator: str | None = None,
         out_dir: Path | None = None,
+        capture_out: list[RawCaptureBundle] | None = None,
+        dump_evidence: bool = False,
+        include_body: bool = True,
+        redact_body: bool = False,
     ) -> AssessmentResult:
         """Execute a complete single-target read-only assessment pipeline."""
         if cve_limit <= 0:
             raise ValidationError("--cve-limit must be a positive integer.")
+        if dump_evidence and out_dir is None:
+            raise ValidationError("--dump-evidence requires --out-dir DIR.")
 
-        prof = self.profile_service.profile(
-            raw_target,
-            authorized=authorized,
-            check_tls_versions=check_tls_versions,
-            check_dns_security=check_dns_security,
-            check_well_known=check_well_known,
-            check_methods=check_methods,
+        local_capture: list[RawCaptureBundle] = []
+        active_capture = (
+            capture_out if capture_out is not None else (local_capture if dump_evidence else None)
         )
+        profile_kwargs: dict[str, object] = {
+            "authorized": authorized,
+            "check_tls_versions": check_tls_versions,
+            "check_dns_security": check_dns_security,
+            "check_well_known": check_well_known,
+            "check_methods": check_methods,
+        }
+        if active_capture is not None:
+            profile_kwargs["capture_out"] = active_capture
+        prof = self.profile_service.profile(raw_target, **profile_kwargs)  # type: ignore[arg-type]
 
         tls_issuer = prof.tls.issuer if prof.tls is not None else None
         fp_matches = match_signatures(
@@ -415,6 +427,48 @@ class AssessService:
             result = replace(result, saved_files=saved)
             assess_path.write_text(dumps_json(result), encoding="utf-8")
 
+            if dump_evidence:
+                from s1shell.dump.exporter import export_evidence_bundle
+                from s1shell.dump.service import run_offline_deep_analyzers
+
+                csp_res, email_res, an_warnings = run_offline_deep_analyzers(prof)
+                extra_entries: list[tuple[Path, str]] = [
+                    (prof_path, "report"),
+                    (fp_path, "report"),
+                    (md_path, "report"),
+                    (html_path, "report"),
+                    (sarif_path, "report"),
+                    (assess_path, "report"),
+                ]
+                if cve_res is not None:
+                    extra_entries.append((resolved_dir / "cves.json", "report"))
+                if intel_res is not None:
+                    extra_entries.append((resolved_dir / "intel.json", "osint"))
+                dump_res = export_evidence_bundle(
+                    resolved_dir,
+                    assessment=result,
+                    capture=active_capture[0] if active_capture else None,
+                    report_service=self.report_service,
+                    scope_manager=self.scope_manager,
+                    csp_result=csp_res,
+                    email_result=email_res,
+                    include_body=include_body,
+                    redact_body=redact_body,
+                    include_reports=False,
+                    extra_manifest_entries=extra_entries,
+                    operator=operator,
+                    warnings=an_warnings,
+                )
+                seen_saved = set(saved)
+                for entry in dump_res.files:
+                    full_p = str(resolved_dir / entry.relative_path)
+                    if full_p not in seen_saved:
+                        saved.append(full_p)
+                        seen_saved.add(full_p)
+                if dump_res.manifest_path not in seen_saved:
+                    saved.append(dump_res.manifest_path)
+                result = replace(result, saved_files=saved)
+
         return result
 
     def assess_batch(
@@ -446,6 +500,9 @@ class AssessService:
         include_remediation: bool = True,
         operator: str | None = None,
         out_dir: Path | None = None,
+        dump_evidence: bool = False,
+        include_body: bool = True,
+        redact_body: bool = False,
     ) -> BatchAssessmentResult:
         """Sequentially assess multiple targets (`concurrency=1`) enforcing scope per target."""
         clean_targets = [t.strip() for t in targets if t.strip() and not t.strip().startswith("#")]
@@ -453,6 +510,8 @@ class AssessService:
             raise ValidationError("No targets provided for batch assessment.")
         if delay_seconds < 0:
             raise ValidationError("--delay must be >= 0.")
+        if dump_evidence and out_dir is None:
+            raise ValidationError("--dump-evidence requires --out-dir DIR.")
 
         summaries: list[BatchTargetSummary] = []
         saved_files: list[str] = []
@@ -500,6 +559,9 @@ class AssessService:
                     include_remediation=include_remediation,
                     operator=operator,
                     out_dir=target_dir,
+                    dump_evidence=dump_evidence,
+                    include_body=include_body,
+                    redact_body=redact_body,
                 )
                 succeeded += 1
                 scores.append(res.posture.score)

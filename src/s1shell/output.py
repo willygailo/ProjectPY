@@ -29,6 +29,7 @@ from s1shell.codec.models import CodecHashResult, CodecInspectResult, CodecTrans
 from s1shell.config import RuntimeConfig
 from s1shell.cve.models import CVESearchResult, DependencyAuditResult
 from s1shell.doctor import DoctorReport
+from s1shell.dump.models import DumpResult
 from s1shell.errors import ValidationError
 from s1shell.fingerprint.models import FingerprintResult
 from s1shell.intel.models import (
@@ -2887,3 +2888,115 @@ def render_cvss_analysis(
     for m in result.metrics:
         mtbl.add_row(m.group, f"{m.name} ({m.metric})", m.code, m.value_label)
     _emit_tables([summary, mtbl], console=console, out_file=out_file, stdout=stdout)
+
+
+def render_dump_result(
+    result: DumpResult,
+    *,
+    fmt: str,
+    console: Console,
+    out_file: Path | None = None,
+    stdout: TextIO | None = None,
+) -> None:
+    """Render `s1shell dump` evidence bundle summary in `table`, `json`, or `md`."""
+    norm = _require_format(fmt, ("table", "json", "md"), command="dump")
+    if norm == "json":
+        write_or_print(dumps_json(result), out_file=out_file, stdout=stdout)
+        return
+    if norm == "md":
+        lines = [
+            f"# S1shell Authorized Evidence Dump: `{result.url}`",
+            "",
+            f"- **Target:** `{result.target}` (pinned IP: `{result.pinned_ip}`)",
+            f"- **Scope:** `{result.scope_id}` (ref: `{result.auth_ref}`)",
+            (
+                f"- **Posture:** `{result.posture_score}/100` "
+                f"(Grade `{result.posture_grade}`, Risk `{result.risk_level}`, "
+                f"{result.finding_count} findings)"
+            ),
+            f"- **Output Directory:** `{result.out_dir}`",
+            f"- **Manifest:** `{result.manifest_path}`",
+            (
+                f"- **Artifacts:** `{result.file_count}` files (`{result.total_bytes:,}` bytes) | "
+                f"body_captured=`{result.body_captured}` | "
+                f"body_redacted=`{result.body_redacted}` | "
+                f"body_truncated=`{result.body_truncated}`"
+            ),
+        ]
+        if result.archive_path:
+            lines.append(
+                f"- **Archive:** `{result.archive_path}` (SHA-256: `{result.archive_sha256}`)"
+            )
+        if result.entity_counts:
+            ent_summary = ", ".join(f"{k}={v}" for k, v in sorted(result.entity_counts.items()))
+            lines.append(f"- **Extracted Entities:** {ent_summary}")
+        lines.extend(
+            [
+                "",
+                "## Exported Evidence Files",
+                "",
+                "| Category | Relative Path | Bytes | SHA-256 |",
+                "|---|---|---:|---|",
+            ]
+        )
+        for entry in result.files:
+            lines.append(
+                f"| `{entry.category}` | `{_md_cell(entry.relative_path)}` | "
+                f"{entry.size_bytes} | `{entry.sha256[:16]}...` |"
+            )
+        if result.warnings:
+            lines.extend(["", "## Warnings", *(f"- {w}" for w in result.warnings)])
+        write_or_print("\n".join(lines), out_file=out_file, stdout=stdout)
+        return
+
+    tables: list[Table] = []
+    summary = Table(title=f"S1shell Evidence Dump: {result.url}")
+    summary.add_column("Field", style="cyan", no_wrap=True)
+    summary.add_column("Value", overflow="fold")
+    summary.add_row("Target / Pinned IP", f"{result.target} ({result.pinned_ip})")
+    summary.add_row("Scope / Auth Ref", f"{result.scope_id} ({result.auth_ref})")
+    summary.add_row(
+        "Posture",
+        (
+            f"{result.posture_score}/100 (Grade {result.posture_grade}, "
+            f"Risk {result.risk_level}, {result.finding_count} findings)"
+        ),
+    )
+    summary.add_row("Output Directory", result.out_dir)
+    summary.add_row("Manifest (SHA-256)", result.manifest_path)
+    summary.add_row(
+        "Captured Files",
+        (
+            f"{result.file_count} files ({result.total_bytes:,} bytes) | "
+            f"body={result.body_captured} | redacted={result.body_redacted} | "
+            f"truncated={result.body_truncated}"
+        ),
+    )
+    if result.archive_path:
+        summary.add_row(
+            "Archive (.tar.gz)",
+            f"{result.archive_path} (sha256={str(result.archive_sha256 or '')[:16]}...)",
+        )
+    if result.entity_counts:
+        summary.add_row(
+            "Extracted Entities",
+            ", ".join(f"{k}={v}" for k, v in sorted(result.entity_counts.items())),
+        )
+    if result.warnings:
+        summary.add_row("Warnings", "\n".join(result.warnings))
+    tables.append(summary)
+
+    ftbl = Table(title="Exported Evidence Artifacts (0600)")
+    ftbl.add_column("Category", style="cyan", no_wrap=True)
+    ftbl.add_column("Relative Path", overflow="fold")
+    ftbl.add_column("Bytes", justify="right", no_wrap=True)
+    ftbl.add_column("SHA-256 (prefix)", no_wrap=True)
+    for entry in result.files:
+        ftbl.add_row(
+            entry.category,
+            entry.relative_path,
+            f"{entry.size_bytes:,}",
+            entry.sha256[:16],
+        )
+    tables.append(ftbl)
+    _emit_tables(tables, console=console, out_file=out_file, stdout=stdout)

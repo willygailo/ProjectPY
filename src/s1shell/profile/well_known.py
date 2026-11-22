@@ -286,6 +286,7 @@ def inspect_well_known(
     pinned_ips: Sequence[str] | None = None,
     verify: ssl.SSLContext | bool = True,
     http_transport: httpx.BaseTransport | None = None,
+    raw_files_out: dict[str, bytes] | None = None,
 ) -> WellKnownCheck:
     """Perform bounded read-only GETs on standard RFC well-known metadata endpoints."""
     is_onion = not parsed.is_ip and is_v3_onion_host(parsed.host)
@@ -353,6 +354,8 @@ def inspect_well_known(
                 sec_policy = parsed_sec.policy
                 sec_present = bool(sec_contacts or "contact:" in text.lower())
                 sec_over_http = sec_present and scheme == "http"
+                if raw_files_out is not None and sec_present:
+                    raw_files_out["security.txt"] = sec_resp.body
         except NetworkError:
             pass
 
@@ -369,6 +372,8 @@ def inspect_well_known(
                 if "user-agent" in text.lower() or "disallow" in text.lower():
                     rob_present = True
                     rob_count, rob_hints, rob_sitemaps = parse_robots_txt_full(text)
+                    if raw_files_out is not None:
+                        raw_files_out["robots.txt"] = rob_resp.body
         except NetworkError:
             pass
 
@@ -386,6 +391,8 @@ def inspect_well_known(
                 ):
                     oidc_present = True
                     oidc_issuer, oidc_issues = parse_oidc_configuration(data)
+                    if raw_files_out is not None:
+                        raw_files_out["openid-configuration.json"] = oidc_resp.body
         except (NetworkError, ValueError):
             pass
 
@@ -401,6 +408,8 @@ def inspect_well_known(
                 if isinstance(data, dict) and isinstance(data.get("keys"), list):
                     jwks_present = True
                     jwks_key_count, jwks_issues = parse_jwks_payload(data)
+                    if raw_files_out is not None:
+                        raw_files_out["jwks.json"] = jwks_resp.body
         except (NetworkError, ValueError):
             pass
 
@@ -419,6 +428,9 @@ def inspect_well_known(
                     m_data = json.loads(m_resp.body.decode("utf-8", errors="replace"))
                     if isinstance(m_data, (dict, list)) and m_data:
                         mobile_trust_files.append(rel_path)
+                        if raw_files_out is not None:
+                            fname = rel_path.rsplit("/", 1)[-1]
+                            raw_files_out[fname] = m_resp.body
             except (NetworkError, ValueError):
                 pass
 
